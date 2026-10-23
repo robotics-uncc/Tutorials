@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tutorials</title>
+<style>
+body{margin:0;font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:#f4f6f8;color:#1c2733}
+header{padding:12px 18px;background:#0e2a3b;color:#fff}
+header h1{margin:0;font-size:18px;font-weight:600}
+header p{margin:2px 0 0;color:#a9c3d3;font-size:13px}
+main{max-width:640px;margin:24px auto;padding:0 18px}
+a{color:#0b6e99}
+html.locked main{visibility:hidden}
+</style>
+</head>
+<body>
+<header>
+  <h1>Tutorials</h1>
+  <p>Autonomous Robots and Systems Laboratory, UNC Charlotte</p>
+</header>
+<div id="gate" style="display:none;position:fixed;inset:0;z-index:99;background:#0e2a3b;color:#fff;align-items:center;justify-content:center;flex-direction:column;gap:10px;font:15px system-ui">
+  <div style="font-size:18px;font-weight:600">Tutorials</div>
+  <form id="gateForm" style="display:flex;gap:6px"><input id="gatePw" type="password" placeholder="Password" autocomplete="off" style="padding:8px;border-radius:6px;border:0"><button style="padding:8px 14px;background:#e4572e;color:#fff;border:0;border-radius:6px">Enter</button></form>
+  <div id="gateMsg" style="color:#f5a;min-height:18px"></div>
+</div>
+<script>
+/* Casual-visitor gate only: NOT security. The page source and repo remain readable. Same salt and hash as airdrop-bathymetry/index.html. */
+(function(){const SALT="airdrop-v1:",HASH="05487323df5a65e4878c1fea5eec7448c514b23e4c6bd352cb80857801b22efd";
+  if(!HASH)return;
+  let ok=false;try{ok=sessionStorage.getItem("gate_ok")===HASH;}catch(e){}
+  if(ok)return;
+  const g=document.getElementById("gate");g.style.display="flex";document.documentElement.classList.add("locked");
+  async function h(t){const b=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(SALT+t));return [...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,"0")).join("");}
+  document.getElementById("gateForm").onsubmit=async e=>{e.preventDefault();
+    if(!(window.crypto&&crypto.subtle)){document.getElementById("gateMsg").textContent="Needs https or a local file.";return;}
+    if(await h(document.getElementById("gatePw").value)===HASH){try{sessionStorage.setItem("gate_ok",HASH);}catch(e){}g.style.display="none";document.documentElement.classList.remove("locked");}
+    else document.getElementById("gateMsg").textContent="Incorrect password.";};
+})();
+</script>
+<main>
+  <ul>
+    <li><a href="airdrop-bathymetry/">AirDrop Bathymetry Mapping Sandbox</a></li>
+  </ul>
+</main>
+</body>
+</html>
