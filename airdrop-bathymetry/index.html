@@ -1,0 +1,630 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AirDrop Bathymetry Mapping Sandbox</title>
+<style>
+:root{--bg:#f4f6f8;--card:#fff;--ink:#1c2733;--mute:#66758a;--line:#d9dfe6;--accent:#0b6e99;--accent2:#e4572e}
+*{box-sizing:border-box}
+body{margin:0;font:14px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--ink)}
+header{padding:12px 18px;background:#0e2a3b;color:#fff}
+header h1{margin:0;font-size:18px;font-weight:600}
+header p{margin:2px 0 0;color:#a9c3d3;font-size:12.5px}
+#app{display:grid;grid-template-columns:300px 1fr;gap:14px;padding:14px;align-items:start}
+@media(max-width:900px){#app{grid-template-columns:1fr}}
+.card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:10px 12px}
+.card h3{margin:0 0 6px;font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--mute)}
+#side{display:flex;flex-direction:column;gap:10px}
+.tools{display:grid;grid-template-columns:1fr 1fr;gap:5px}
+button,select,input{font:inherit}
+button{border:1px solid var(--line);background:#fff;border-radius:6px;padding:6px 8px;cursor:pointer;color:var(--ink)}
+button:hover{border-color:var(--accent)}
+button.on{background:var(--accent);border-color:var(--accent);color:#fff}
+button.run{background:var(--accent2);border-color:var(--accent2);color:#fff;font-weight:600;font-size:15px;padding:9px}
+button:disabled{opacity:.5;cursor:default}
+.row{display:flex;gap:6px;align-items:center;margin:4px 0}
+.row label{flex:1;color:var(--ink)}
+.row input[type=number]{width:72px;padding:3px 5px;border:1px solid var(--line);border-radius:4px}
+.row .u{width:34px;color:var(--mute);font-size:12px}
+details summary{cursor:pointer;font-weight:600;font-size:13px;margin:2px 0}
+#views{display:flex;flex-direction:column;gap:12px;min-width:0}
+.panels{display:grid;grid-template-columns:repeat(auto-fit,minmax(310px,1fr));gap:12px}
+.panels canvas{width:100%;aspect-ratio:1;display:block;border-radius:4px;background:#dcecf4;touch-action:none}
+.panels .hd{display:flex;justify-content:space-between;align-items:center;margin-bottom:5px}
+.panels .hd b{font-size:13px}
+.seg button{padding:2px 8px;font-size:12px}
+.plots{display:grid;grid-template-columns:repeat(auto-fit,minmax(380px,1fr));gap:12px}
+.plots canvas{width:100%;height:250px;display:block}
+#bar{display:flex;flex-wrap:wrap;gap:10px 16px;align-items:center}
+#bar input[type=range]{flex:1;min-width:200px}
+#stat{font-variant-numeric:tabular-nums;color:var(--ink)}
+#msg{color:var(--mute);font-size:12.5px;min-height:18px}
+.kpi{display:flex;gap:18px;flex-wrap:wrap;font-variant-numeric:tabular-nums}
+.kpi div b{font-size:20px;display:block}
+.kpi div span{font-size:11.5px;color:var(--mute)}
+textarea{width:100%;height:80px;font:11px monospace}
+.warn{color:#b3261e}
+.locked #app{display:none}
+</style>
+</head>
+<body>
+<header>
+  <h1>Air-dropped marine robots: homing &amp; bathymetry mapping</h1>
+  <p>A quadrotor releases small marine robots; each homes to the collection point around obstacles while sounding the bottom. A Gaussian process maps the bathymetry from the samples. Everything runs in your browser; no install.</p>
+</header>
+<div id="gate" style="display:none;position:fixed;inset:0;z-index:99;background:#0e2a3b;color:#fff;align-items:center;justify-content:center;flex-direction:column;gap:10px;font:15px system-ui">
+  <div style="font-size:18px;font-weight:600">Air-drop bathymetry mapping sandbox</div>
+  <form id="gateForm" style="display:flex;gap:6px"><input id="gatePw" type="password" placeholder="Password" autocomplete="off" style="padding:8px;border-radius:6px;border:0"><button style="padding:8px 14px;background:#e4572e;color:#fff;border:0;border-radius:6px">Enter</button></form>
+  <div id="gateMsg" style="color:#f5a;min-height:18px"></div>
+</div>
+<script>
+/* Casual-visitor gate only: NOT security. The page source and repo remain readable. Set with: python3 setpw.py "<password>" */
+(function(){const SALT="airdrop-v1:",HASH="05487323df5a65e4878c1fea5eec7448c514b23e4c6bd352cb80857801b22efd";
+  if(!HASH)return;
+  let ok=false;try{ok=sessionStorage.getItem("gate_ok")===HASH;}catch(e){}
+  if(ok)return;
+  const g=document.getElementById("gate");g.style.display="flex";document.documentElement.classList.add("locked");
+  async function h(t){const b=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(SALT+t));return [...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,"0")).join("");}
+  document.getElementById("gateForm").onsubmit=async e=>{e.preventDefault();
+    if(!(window.crypto&&crypto.subtle)){document.getElementById("gateMsg").textContent="Needs https or a local file.";return;}
+    if(await h(document.getElementById("gatePw").value)===HASH){try{sessionStorage.setItem("gate_ok",HASH);}catch(e){}g.style.display="none";document.documentElement.classList.remove("locked");window.dispatchEvent(new Event("resize"));}
+    else document.getElementById("gateMsg").textContent="Incorrect password.";};
+})();
+</script>
+<div id="app">
+<aside id="side">
+  <div class="card">
+    <h3>1 · Place things (click map, then tool)</h3>
+    <div class="tools" id="tools"></div>
+    <div class="row" style="margin-top:6px"><button id="finishPoly" style="display:none;width:100%">Close polygon</button></div>
+    <div id="msg"></div>
+  </div>
+  <div class="card">
+    <h3>Deployment layout</h3>
+    <div class="row"><label>Pattern</label>
+      <select id="layoutKind"><option value="line">Line (west edge)</option><option value="spread">Spread (grid)</option><option value="cluster">Cluster</option><option value="ring">Ring</option></select></div>
+    <div class="row"><label>Robots</label><input type="number" id="layoutN" value="4" min="1" max="12" step="1"><button id="applyLayout">Apply</button></div>
+  </div>
+  <div class="card">
+    <h3>2 · Parameters</h3>
+    <div id="params"></div>
+  </div>
+  <div class="card">
+    <button class="run" id="runBtn" style="width:100%">▶ Run simulation</button>
+    <div class="row" style="margin-top:6px">
+      <button id="playBtn" disabled style="flex:1">Pause</button>
+      <button id="resetBtn" disabled style="flex:1">Rewind</button>
+      <button id="pinBtn" disabled style="flex:1" title="Keep this run's curves for comparison">Pin run</button>
+    </div>
+    <div class="row"><button id="clearPins" style="flex:1">Clear pinned</button></div>
+  </div>
+  <div class="card">
+    <details><summary>Share / load scenario (JSON)</summary>
+      <textarea id="json" spellcheck="false"></textarea>
+      <div class="row"><button id="expBtn" style="flex:1">Export</button><button id="impBtn" style="flex:1">Import</button></div>
+    </details>
+  </div>
+</aside>
+
+<main id="views">
+  <div class="panels">
+    <div class="card"><div class="hd"><b>Mission (live)</b><span id="legendHint" style="font-size:11.5px;color:var(--mute)">dashed = planned · solid = actual</span></div><canvas id="cvLive" width="640" height="640"></canvas></div>
+    <div class="card"><div class="hd"><b>Ground-truth bathymetry</b></div><canvas id="cvTruth" width="640" height="640"></canvas></div>
+    <div class="card"><div class="hd"><b id="estTitle">GP estimate</b>
+      <span class="seg"><button id="vEst" class="on">Estimate</button><button id="vErr">|Error|</button></span></div><canvas id="cvEst" width="640" height="640"></canvas></div>
+  </div>
+  <div class="card" id="bar">
+    <input type="range" id="tSlider" min="0" max="1" step="0.5" value="0" disabled>
+    <label>Playback speed <select id="speed"><option>1</option><option>5</option><option>10</option><option selected>20</option><option>50</option><option>100</option><option>200</option></select>×</label>
+    <div id="stat">Press “Run simulation”.</div>
+  </div>
+  <div class="card kpi" id="kpi"></div>
+  <div class="plots">
+    <div class="card"><h3>Coverage (% of free area swept by sensor footprint)</h3><canvas id="plCov"></canvas></div>
+    <div class="card"><h3>Mapping error ME = RMSE(GP mean − truth) [m]</h3><canvas id="plME"></canvas></div>
+  </div>
+  <div class="card" style="font-size:12.5px;color:var(--mute)">
+    <b style="color:var(--ink)">Model notes.</b>
+    Quadrotor: trapezoidal horizontal profile (accel-limited), hover power scaled with payload mass (P ∝ m^1.5), robots descend on a small drogue.
+    Marine robot: unicycle with first-order motor/yaw lag, bounded turn rate, ocean-current drift, OU yaw/speed noise; A* planning on obstacle-inflated grid, pure-pursuit tracking, next waypoint becomes active when the current one is reached.
+    Footprint radius r = depth · tan(β/2) (β = full beam angle). Sensor samples depth at the robot position at the chosen rate (+ Gaussian noise). GP: squared-exponential kernel, fixed hyper-parameters, incremental Cholesky; samples closer than ℓ/20 to an already-used one are skipped to bound cost.
+    Robots do not avoid one another. Bathymetry is synthetic (seeded).
+  </div>
+</main>
+</div>
+
+<script id="core">
+/* ===================== CORE (no DOM) ===================== */
+const Core=(function(){
+const W=200,G=200,TAU=Math.PI*2;
+
+/* ---- RNG ---- */
+function rng(seed){let a=seed>>>0;return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+function gauss(r){let u=0;while(!u)u=r();const v=r();return Math.sqrt(-2*Math.log(u))*Math.cos(TAU*v);}
+
+/* ---- synthetic bathymetry: tilted plane + Gaussian bumps, softly floored at 2.5 m ---- */
+function makeTruth(seed){
+  const r=rng(seed*7919+13),B=[];
+  for(let i=0;i<9;i++)B.push({x:r()*W,y:r()*W,a:(r()<.5?-1:1)*(1.5+3*r()),s:14+22*r()});
+  const gx=(r()-.5)*.04,gy=(r()-.5)*.04;
+  const sp=u=>u>30?u:Math.log1p(Math.exp(u));
+  function depth(x,y){let d=8+gx*(x-100)+gy*(y-100);
+    for(const b of B){const dx=x-b.x,dy=y-b.y;d+=b.a*Math.exp(-(dx*dx+dy*dy)/(2*b.s*b.s));}
+    return 2.5+sp(d-2.5);}
+  let lo=1e9,hi=-1e9;
+  for(let j=0;j<50;j++)for(let i=0;i<50;i++){const d=depth((i+.5)*4,(j+.5)*4);lo=Math.min(lo,d);hi=Math.max(hi,d);}
+  return {depth,dmin:lo,dmax:hi};
+}
+
+/* ---- geometry ---- */
+function pip(poly,x,y){let c=false;for(let i=0,j=poly.length-1;i<poly.length;j=i++){const a=poly[i],b=poly[j];
+  if((a.y>y)!==(b.y>y)&&x<(b.x-a.x)*(y-a.y)/(b.y-a.y)+a.x)c=!c;}return c;}
+function dseg(px,py,a,b){const dx=b.x-a.x,dy=b.y-a.y,l2=dx*dx+dy*dy||1e-12;
+  let u=((px-a.x)*dx+(py-a.y)*dy)/l2;u=Math.max(0,Math.min(1,u));return Math.hypot(px-a.x-u*dx,py-a.y-u*dy);}
+function buildGrids(obs,clr){
+  const water=new Uint8Array(G*G),free=new Uint8Array(G*G);
+  const bb=obs.map(o=>{let x0=1e9,x1=-1e9,y0=1e9,y1=-1e9;for(const p of o){x0=Math.min(x0,p.x);x1=Math.max(x1,p.x);y0=Math.min(y0,p.y);y1=Math.max(y1,p.y);}return [x0-clr,x1+clr,y0-clr,y1+clr];});
+  for(let j=0;j<G;j++)for(let i=0;i<G;i++){
+    const x=i+.5,y=j+.5;let inside=false,dm=1e9;
+    for(let k=0;k<obs.length;k++){const b=bb[k];if(x<b[0]||x>b[1]||y<b[2]||y>b[3])continue;const o=obs[k];
+      if(pip(o,x,y))inside=true;
+      for(let e=0,f=o.length-1;e<o.length;f=e++)dm=Math.min(dm,dseg(x,y,o[e],o[f]));}
+    water[j*G+i]=inside?0:1;
+    free[j*G+i]=(!inside&&dm>=clr&&x>=1.5&&x<=W-1.5&&y>=1.5&&y<=W-1.5)?1:0;}
+  return {water,free};
+}
+const cellOf=(x,y)=>[Math.max(0,Math.min(G-1,Math.floor(x))),Math.max(0,Math.min(G-1,Math.floor(y)))];
+function isWater(gr,x,y){if(x<0||y<0||x>=W||y>=W)return false;const c=cellOf(x,y);return gr.water[c[1]*G+c[0]]===1;}
+function nearestFree(free,x,y){const [ci,cj]=cellOf(x,y);if(free[cj*G+ci])return [ci,cj];
+  for(let R=1;R<80;R++){let best=null,bd=1e9;
+    for(let j=cj-R;j<=cj+R;j++)for(let i=ci-R;i<=ci+R;i++){
+      if(i<0||j<0||i>=G||j>=G)continue;if(Math.max(Math.abs(i-ci),Math.abs(j-cj))!==R)continue;
+      if(free[j*G+i]){const d=(i-ci)**2+(j-cj)**2;if(d<bd){bd=d;best=[i,j];}}}
+    if(best)return best;}
+  return null;}
+
+/* ---- A* (8-connected, no corner cutting) + string-pulling ---- */
+function astar(free,s,g){
+  const N=G*G,gs=new Float32Array(N).fill(Infinity),from=new Int32Array(N).fill(-1),closed=new Uint8Array(N);
+  const HK=[],HI=[];
+  const push=(k,id)=>{let i=HK.length;HK.push(k);HI.push(id);while(i>0){const p=(i-1)>>1;if(HK[p]<=HK[i])break;
+    [HK[p],HK[i]]=[HK[i],HK[p]];[HI[p],HI[i]]=[HI[i],HI[p]];i=p;}};
+  const pop=()=>{const id=HI[0],lk=HK.pop(),li=HI.pop();if(HK.length){HK[0]=lk;HI[0]=li;let i=0;
+    for(;;){const l=2*i+1,r=l+1;let m=i;if(l<HK.length&&HK[l]<HK[m])m=l;if(r<HK.length&&HK[r]<HK[m])m=r;if(m===i)break;
+      [HK[m],HK[i]]=[HK[i],HK[m]];[HI[m],HI[i]]=[HI[i],HI[m]];i=m;}}return id;};
+  const h=(i,j)=>{const dx=Math.abs(i-g[0]),dy=Math.abs(j-g[1]);return Math.max(dx,dy)+.4142*Math.min(dx,dy);};
+  const s0=s[1]*G+s[0],g0=g[1]*G+g[0];gs[s0]=0;push(h(s[0],s[1]),s0);
+  while(HK.length){const id=pop();if(closed[id])continue;closed[id]=1;if(id===g0)break;
+    const ci=id%G,cj=(id/G)|0;
+    for(let dj=-1;dj<=1;dj++)for(let di=-1;di<=1;di++){if(!di&&!dj)continue;
+      const ni=ci+di,nj=cj+dj;if(ni<0||nj<0||ni>=G||nj>=G)continue;const nid=nj*G+ni;
+      if(!free[nid]||closed[nid])continue;
+      if(di&&dj&&(!free[cj*G+ni]||!free[nj*G+ci]))continue;
+      const ng=gs[id]+(di&&dj?1.4142:1);
+      if(ng<gs[nid]){gs[nid]=ng;from[nid]=id;push(ng+h(ni,nj),nid);}}}
+  if(from[g0]<0&&g0!==s0)return null;
+  const out=[];for(let id=g0;id>=0;id=from[id]){out.push([id%G,(id/G)|0]);if(id===s0)break;}
+  return out.reverse();
+}
+function los(free,p,q){const n=Math.ceil(Math.hypot(q.x-p.x,q.y-p.y)/.5);
+  for(let k=0;k<=n;k++){const u=k/n,c=cellOf(p.x+u*(q.x-p.x),p.y+u*(q.y-p.y));if(!free[c[1]*G+c[0]])return false;}return true;}
+function plan(gr,a,b){
+  const sc=nearestFree(gr.free,a.x,a.y),gc=nearestFree(gr.free,b.x,b.y);if(!sc||!gc)return [a,b];
+  const cells=astar(gr.free,sc,gc);if(!cells)return [a,b];
+  const pts=cells.map(c=>({x:c[0]+.5,y:c[1]+.5}));
+  const out=[pts[0]];let i=0;
+  while(i<pts.length-1){let j=pts.length-1;while(j>i+1&&!los(gr.free,pts[i],pts[j]))j--;out.push(pts[j]);i=j;}
+  const res=[{x:a.x,y:a.y}];
+  if(out.length>1||Math.hypot(out[0].x-a.x,out[0].y-a.y)>1)res.push(...out.slice(0,-1).filter((p,k)=>k>0||Math.hypot(p.x-a.x,p.y-a.y)>1));
+  const l=out[out.length-1];if(Math.hypot(l.x-b.x,l.y-b.y)>1&&out.length>1)res.push(out[out.length-1]);
+  res.push({x:b.x,y:b.y});return res;
+}
+function mkPath(pts){const cum=[0];for(let i=1;i<pts.length;i++)cum.push(cum[i-1]+Math.hypot(pts[i].x-pts[i-1].x,pts[i].y-pts[i-1].y));return {pts,cum,len:cum[cum.length-1]};}
+function planStages(gr,robot,collect){const P=[robot,...robot.wps,collect],st=[];for(let k=0;k<P.length-1;k++)st.push(mkPath(plan(gr,P[k],P[k+1])));return st;}
+function pointAt(L,s){s=Math.max(0,Math.min(L.len,s));let i=0;while(i<L.pts.length-2&&L.cum[i+1]<s)i++;
+  const a=L.pts[i],b=L.pts[i+1],l=L.cum[i+1]-L.cum[i]||1e-9,u=(s-L.cum[i])/l;return {x:a.x+u*(b.x-a.x),y:a.y+u*(b.y-a.y)};}
+function project(L,x,y,si){let best=1e18,bs=0,bi=si;
+  for(let i=si;i<Math.min(si+5,L.pts.length-1);i++){const a=L.pts[i],b=L.pts[i+1],dx=b.x-a.x,dy=b.y-a.y,l2=dx*dx+dy*dy||1e-9;
+    let u=((x-a.x)*dx+(y-a.y)*dy)/l2;u=Math.max(0,Math.min(1,u));const d=(x-a.x-u*dx)**2+(y-a.y-u*dy)**2;
+    if(d<best){best=d;bs=L.cum[i]+u*Math.sqrt(l2);bi=i;}}
+  return {s:bs,i:bi};}
+
+/* ---- quadrotor: preflight, climb, accel-limited transits, hover+release, return, descent, land ---- */
+function transitTime(d,v,a){const da=v*v/(2*a);return d>2*da?2*v/a+(d-2*da)/v:2*Math.sqrt(d/a);}
+function transitS(d,v,a,tau){const da=v*v/(2*a);
+  if(d>2*da){const ta=v/a,tc=(d-2*da)/v,T=2*ta+tc;
+    if(tau<=ta)return .5*a*tau*tau;if(tau<=ta+tc)return da+v*(tau-ta);const q=Math.max(0,T-tau);return d-.5*a*q*q;}
+  const tp=Math.sqrt(d/a),T=2*tp;return tau<=tp?.5*a*tau*tau:d-.5*a*Math.max(0,T-tau)**2;}
+function quadPlan(P,launch,robots){
+  const dt=.5,o={dt,t:[],x:[],y:[],z:[],ph:[],E:[],release:new Array(robots.length).fill(0),order:[]};
+  const rem=robots.map((_,i)=>i);let c=launch;
+  while(rem.length){let bi=0,bd=1e18;rem.forEach((ri,k)=>{const d=Math.hypot(robots[ri].x-c.x,robots[ri].y-c.y);if(d<bd){bd=d;bi=k;}});
+    const ri=rem.splice(bi,1)[0];o.order.push(ri);c=robots[ri];}
+  let t=0,x=launch.x,y=launch.y,z=0,E=0,n=robots.length;
+  const Ph=()=>P.qPh*Math.pow((P.mBase+P.mRobot*n)/P.mBase,1.5);
+  function seg(ph,dur,watts,fn){dur=Math.ceil(dur/dt-1e-9)*dt;
+    for(let tau=0;tau<dur-1e-9;tau+=dt){fn(tau,dur);o.t.push(t);o.x.push(x);o.y.push(y);o.z.push(z);o.ph.push(ph);o.E.push(E);t+=dt;E+=watts*dt/3600;}
+    fn(dur,dur);}
+  const hold=(ph,dur,w)=>seg(ph,dur,w,()=>{});
+  const fly=(ph,to)=>{const x0=x,y0=y,d=Math.hypot(to.x-x0,to.y-y0)||1e-6,ux=(to.x-x0)/d,uy=(to.y-y0)/d,T=transitTime(d,P.qCruise,P.qAccel);
+    seg(ph,T,1.05*Ph(),(tau)=>{const s=transitS(d,P.qCruise,P.qAccel,Math.min(tau,T));x=x0+ux*s;y=y0+uy*s;});x=to.x;y=to.y;};
+  hold('Pre-flight / spin-up',6,15);
+  seg('Takeoff & climb',P.qAlt/P.qClimb+2,1.3*Ph(),(tau,dur)=>{const u=Math.min(1,tau/dur);z=P.qAlt*u*u*(3-2*u);});z=P.qAlt;
+  for(const ri of o.order){
+    fly('Transit to drop point',robots[ri]);
+    hold('Hover / stabilise',4,Ph());
+    o.release[ri]=t;n--;
+    hold('Release',3,Ph());
+  }
+  fly('Return to launch',launch);
+  const tA=(P.qAlt-3)/P.qDesc;
+  seg('Descent & landing',tA+6,.75*Ph(),(tau)=>{z=tau<=tA?P.qAlt-P.qDesc*tau:Math.max(0,3-.5*(tau-tA));});z=0;
+  hold('Landed',2,15);
+  o.t.push(t);o.x.push(x);o.y.push(y);o.z.push(0);o.ph.push('Landed');o.E.push(E);
+  o.tEnd=t;o.Ewh=E;return o;
+}
+
+/* ---- marine robot: unicycle + motor lag + current + OU noise, pure-pursuit tracking of planned stages ---- */
+function simRobot(P,stages,t0,seed,truth,gr){
+  const r=rng(seed),dt=.1,SK=5,Ld=4;
+  const p0=stages[0].pts[0];let x=p0.x+gauss(r)*P.scatter,y=p0.y+gauss(r)*P.scatter;
+  if(!isWater(gr,x,y)){x=p0.x;y=p0.y;}
+  let psi=r()*TAU,v=0,w=0,nz=0,nv=0,stg=0,s=0,si=0,t=t0,k=0,nextS=t0;
+  const ph0=r()*TAU,ph1=r()*TAU;
+  const o={t0,xs:[],ys:[],ps:[],samples:[],collisions:0,collected:false,tDone:t0};
+  const aV=1-Math.exp(-dt/P.tauV),aW=1-Math.exp(-dt/P.tauW),tauN=4,kN=Math.sqrt(2*dt/tauN);
+  const tmax=t0+P.maxTime,rmax=P.rMax;
+  const store=()=>{o.xs.push(x);o.ys.push(y);o.ps.push(psi);};
+  for(;t<=tmax;t+=dt,k++){
+    if(k%SK===0)store();
+    if(t>=nextS-1e-9){o.samples.push({t,x,y,z:truth.depth(x,y)+P.sn*gauss(r)});nextS+=1/P.fs;}
+    let L=stages[stg];
+    const last=stg===stages.length-1,E=L.pts[L.pts.length-1],dE=Math.hypot(E.x-x,E.y-y);
+    if(dE<(last?P.collectR:2.5)){stg++;
+      if(stg>=stages.length){o.collected=true;o.tDone=t;store();break;}
+      L=stages[stg];s=0;si=0;}
+    const pr=project(L,x,y,si);s=Math.max(s,pr.s);si=pr.i;
+    const tg=pointAt(L,s+Ld);
+    let err=Math.atan2(tg.y-y,tg.x-x)-psi;err=Math.atan2(Math.sin(err),Math.cos(err));
+    const Lend=stages[stages.length-1].pts.slice(-1)[0],dEnd=Math.hypot(Lend.x-x,Lend.y-y);
+    let vc=P.vRobot*Math.max(.2,Math.cos(err));if(stg===stages.length-1)vc*=Math.max(.35,Math.min(1,dEnd/8));
+    const wc=Math.max(-rmax,Math.min(rmax,2*err));
+    v+=(vc-v)*aV;w+=(wc-w)*aW;
+    nz+=-nz/tauN*dt+P.yawNoise*kN*gauss(r);nv+=-nv/tauN*dt+.04*kN*gauss(r);
+    psi+=(w+nz)*dt;
+    const cx=P.current*(Math.cos(ph0)+.4*Math.sin(TAU*t/150+ph1)),cy=P.current*(Math.sin(ph0)+.4*Math.cos(TAU*t/110+ph1));
+    const ox=x,oy=y,vv=v*(1+nv);
+    x+=(vv*Math.cos(psi)+cx)*dt;y+=(vv*Math.sin(psi)+cy)*dt;
+    if(!isWater(gr,x,y)){o.collisions++;x=ox;y=oy;v*=.2;}
+  }
+  if(!o.collected){o.tDone=t;}
+  return o;
+}
+
+/* ---- coverage: first-swept time per cell, footprint radius = depth*tan(beam/2) ---- */
+function stampDisc(first,water,cx,cy,r,t){
+  const i0=Math.max(0,Math.floor(cx-r)),i1=Math.min(G-1,Math.floor(cx+r)),j0=Math.max(0,Math.floor(cy-r)),j1=Math.min(G-1,Math.floor(cy+r)),r2=r*r;
+  for(let j=j0;j<=j1;j++)for(let i=i0;i<=i1;i++){const dx=i+.5-cx,dy=j+.5-cy;
+    if(dx*dx+dy*dy<=r2){const id=j*G+i;if(water[id]&&first[id]>t)first[id]=t;}}}
+function coverage(P,robots,truth,gr,T){
+  const first=new Float32Array(G*G).fill(Infinity),tb=Math.tan(P.beam*Math.PI/360);
+  let total=0;for(let i=0;i<G*G;i++)total+=gr.water[i];
+  for(const rb of robots){let lx=-1e9,ly=-1e9;
+    for(let i=0;i<rb.xs.length;i++){const x=rb.xs[i],y=rb.ys[i],rad=truth.depth(x,y)*tb;
+      if(Math.hypot(x-lx,y-ly)<Math.max(.4,.15*rad)&&i<rb.xs.length-1)continue;
+      lx=x;ly=y;stampDisc(first,gr.water,x,y,rad,rb.t0+.5*i);}}
+  const n=Math.ceil(T)+1,bin=new Float64Array(n+1);
+  for(let i=0;i<G*G;i++)if(first[i]<Infinity)bin[Math.min(n,Math.ceil(first[i]))]++;
+  const ts=[],pct=[];let c=0;for(let k=0;k<=n;k++){c+=bin[k];ts.push(k);pct.push(100*c/total);}
+  return {t:ts,pct,first,total};
+}
+
+/* ---- GP: squared-exponential kernel, incremental Cholesky ---- */
+class GP{
+  constructor(ell,sigf,sn,cap){this.ell=ell;this.s2=sigf*sigf;this.n2=sn*sn;this.cap=cap;this.n=0;
+    this.L=new Float64Array(cap*cap);this.X=new Float64Array(cap);this.Y=new Float64Array(cap);this.Z=new Float64Array(cap);this.k=new Float64Array(cap);}
+  kern(x,y,u,v){const dx=x-u,dy=y-v;return this.s2*Math.exp(-(dx*dx+dy*dy)/(2*this.ell*this.ell));}
+  add(x,y,z){const n=this.n,c=this.cap;if(n>=c)return false;const k=this.k,L=this.L,row=n*c;let s=0;
+    for(let j=0;j<n;j++)k[j]=this.kern(x,y,this.X[j],this.Y[j]);
+    for(let j=0;j<n;j++){let sum=k[j];const jr=j*c;for(let m=0;m<j;m++)sum-=L[row+m]*L[jr+m];const l=sum/L[jr+j];L[row+j]=l;s+=l*l;}
+    const d=this.s2+this.n2-s;if(d<=1e-9)return false;
+    L[row+n]=Math.sqrt(d);this.X[n]=x;this.Y[n]=y;this.Z[n]=z;this.n++;return true;}
+  minDist2(x,y){let m=1e18;for(let j=0;j<this.n;j++){const dx=x-this.X[j],dy=y-this.Y[j];m=Math.min(m,dx*dx+dy*dy);}return m;}
+  /* posterior mean on a tensor grid (xs × ys); constant mean = sample mean */
+  meanGrid(xs,ys,out,prior){const n=this.n,c=this.cap,L=this.L;
+    if(n===0){out.fill(prior);return;}
+    let ym=0;for(let j=0;j<n;j++)ym+=this.Z[j];ym/=n;
+    const a=new Float64Array(n);
+    for(let i=0;i<n;i++){let s=this.Z[i]-ym;const r=i*c;for(let m=0;m<i;m++)s-=L[r+m]*a[m];a[i]=s/L[r+i];}
+    for(let i=n-1;i>=0;i--){let s=a[i];for(let m=i+1;m<n;m++)s-=L[m*c+i]*a[m];a[i]=s/L[i*c+i];}
+    const gx=xs.length,gy=ys.length,il2=1/(2*this.ell*this.ell),EX=new Float64Array(n*gx),EY=new Float64Array(n*gy);
+    for(let j=0;j<n;j++){for(let i=0;i<gx;i++){const d=xs[i]-this.X[j];EX[j*gx+i]=Math.exp(-d*d*il2);}
+      for(let i=0;i<gy;i++){const d=ys[i]-this.Y[j];EY[j*gy+i]=Math.exp(-d*d*il2);}}
+    out.fill(0);
+    for(let j=0;j<n;j++){const aj=a[j]*this.s2;for(let iy=0;iy<gy;iy++){const f=aj*EY[j*gy+iy],o=iy*gx;for(let ix=0;ix<gx;ix++)out[o+ix]+=f*EX[j*gx+ix];}}
+    for(let i=0;i<out.length;i++)out[i]+=ym;}
+}
+
+/* ---- full pre-computation (everything except the GP checkpoints) ---- */
+function prepare(P,S){
+  const truth=makeTruth(P.seed),gr=buildGrids(S.obstacles,P.clearance);
+  const stages=S.robots.map(r=>planStages(gr,r,S.collect));
+  const quad=quadPlan(P,S.launch,S.robots);
+  const robots=stages.map((st,i)=>simRobot(P,st,quad.release[i]+P.qAlt/P.vFall+P.settle,P.seed*101+i*17+3,truth,gr));
+  let T=quad.tEnd;for(const r of robots)T=Math.max(T,r.tDone);T=Math.ceil(T);
+  const cov=coverage(P,robots,truth,gr,T);
+  const samples=[];robots.forEach((r,i)=>r.samples.forEach(s=>samples.push({...s,r:i})));samples.sort((a,b)=>a.t-b.t);
+  return {P,S,truth,gr,stages,quad,robots,T,cov,samples};
+}
+class GPRun{
+  constructor(run){const P=run.P;this.run=run;this.gx=50;const h=W/this.gx;
+    this.xs=new Float64Array(this.gx).map((_,i)=>(i+.5)*h);this.ys=this.xs;
+    this.truthG=new Float32Array(this.gx*this.gx);this.water=new Uint8Array(this.gx*this.gx);
+    for(let j=0;j<this.gx;j++)for(let i=0;i<this.gx;i++){this.truthG[j*this.gx+i]=run.truth.depth(this.xs[i],this.ys[j]);
+      this.water[j*this.gx+i]=isWater(run.gr,this.xs[i],this.ys[j])?1:0;}
+    this.gp=new GP(P.ell,P.sigf,P.sn,P.gpCap);this.dtc=Math.max(P.gpDt,run.T/120);this.nck=Math.ceil(run.T/this.dtc)+1;
+    this.k=0;this.si=0;this.tk=[];this.me=[];this.maps=[];this.used=[];this.accepted=[];this.dmin2=(P.ell/20)**2;}
+  get done(){return this.k>=this.nck;}
+  step(){const run=this.run,P=run.P,t=this.k*this.dtc;
+    while(this.si<run.samples.length&&run.samples[this.si].t<=t){const s=run.samples[this.si++];
+      if(this.gp.n<this.gp.cap&&this.gp.minDist2(s.x,s.y)>=this.dmin2&&this.gp.add(s.x,s.y,s.z))this.accepted.push(s);}
+    const out=new Float32Array(this.gx*this.gx);this.gp.meanGrid(this.xs,this.ys,out,P.nominal);
+    let se=0,c=0;for(let i=0;i<out.length;i++)if(this.water[i]){const e=out[i]-this.truthG[i];se+=e*e;c++;}
+    this.tk.push(t);this.me.push(Math.sqrt(se/c));this.maps.push(out);this.used.push(this.accepted.length);this.k++;return this.k/this.nck;}
+}
+
+return {W,G,rng,gauss,makeTruth,pip,buildGrids,isWater,nearestFree,plan,planStages,quadPlan,simRobot,stampDisc,coverage,GP,prepare,GPRun,pointAt};
+})();
+if(typeof module!=='undefined')module.exports=Core;
+</script>
+
+<script id="ui">
+/* ===================== UI ===================== */
+(function(){
+if(typeof document==='undefined')return;
+const W=Core.W;
+const $=id=>document.getElementById(id);
+const COL=['#e4572e','#17a2a2','#7b2cbf','#f5a623','#2e86ab','#d81159','#4f9d69','#8d6a9f'];
+const PIN_COL=['#6b7b8c','#a67c00','#2a7f62','#9b3d6e','#3c5a99'];
+
+/* parameters: id, label, unit, default, min, max, step, group */
+const PDEF=[
+ ['vRobot','Robot cruise speed','m/s',0.30,0.1,1.0,0.05,'Marine robots'],
+ ['fs','Sample rate','Hz',1,0.1,5,0.1,'Marine robots'],
+ ['beam','Beam angle (full)','deg',90,20,140,5,'Marine robots'],
+ ['current','Current speed','m/s',0.03,0,0.15,0.01,'Marine robots'],
+ ['ell','GP length-scale ℓ','m',25,5,60,1,'Mapping (GP)'],
+ ['sigf','GP signal σf','m',3,0.5,8,0.5,'Mapping (GP)'],
+ ['sn','Sensor noise σ','m',0.1,0.01,0.5,0.01,'Mapping (GP)'],
+ ['qCruise','Quad cruise speed','m/s',10,3,15,1,'Quadrotor'],
+ ['qAlt','Release altitude','m',30,10,60,5,'Quadrotor'],
+ ['qPh','Hover power (1.5 kg)','W',170,80,400,10,'Quadrotor'],
+ ['seed','Bathymetry seed','',7,1,999,1,'Environment'],
+];
+const FIXED={clearance:3,scatter:1.5,settle:3,maxTime:1500,gpDt:5,collectR:4,nominal:8,mBase:1.5,mRobot:0.3,
+  qClimb:2.5,qDesc:1.5,qAccel:2,vFall:5,tauV:2.0,tauW:0.7,rMax:0.5,yawNoise:0.05,gpCap:1500,battery:74};
+const params=$('params');let grp='';
+for(const d of PDEF){if(d[7]!==grp){grp=d[7];const h=document.createElement('div');h.innerHTML='<b style="font-size:12px;color:var(--mute)">'+grp+'</b>';h.style.marginTop='6px';params.appendChild(h);}
+  const r=document.createElement('div');r.className='row';
+  r.innerHTML=`<label for="p_${d[0]}">${d[1]}</label><input type="number" id="p_${d[0]}" value="${d[3]}" min="${d[4]}" max="${d[5]}" step="${d[6]}"><span class="u">${d[2]}</span>`;
+  params.appendChild(r);}
+function readP(){const P={...FIXED};for(const d of PDEF){let v=parseFloat($('p_'+d[0]).value);if(!isFinite(v))v=d[3];P[d[0]]=Math.max(d[4],Math.min(d[5],v));}return P;}
+
+/* scenario */
+let S={launch:{x:14,y:14},collect:{x:184,y:184},
+  robots:[{x:20,y:100,wps:[]},{x:50,y:162,wps:[]},{x:95,y:34,wps:[]},{x:150,y:92,wps:[]}],
+  obstacles:[
+   [{x:80,y:85},{x:110,y:70},{x:125,y:95},{x:115,y:125},{x:88,y:120}],
+   [{x:140,y:150},{x:165,y:135},{x:172,y:160},{x:150,y:174}],
+   [{x:38,y:56},{x:64,y:52},{x:70,y:80},{x:44,y:86}]]};
+let tool='select',sel=0,draft=[],run=null,gpr=null,tNow=0,playing=false,pins=[],pinN=0,view='est',busy=false;
+let grids=null,stagesPrev=null,dirty=true,truthCache=null,truthSeed=null;
+
+/* tools */
+const TOOLS=[['select','✥ Move / select'],['launch','🛫 Launch pt'],['collect','🎯 Collection pt'],['drop','＋ Drop pt (robot)'],['wp','◆ Waypoint (sel. robot)'],['obs','⬠ Draw obstacle'],['del','✕ Delete']];
+const tb=$('tools');
+for(const [k,l] of TOOLS){const b=document.createElement('button');b.textContent=l;b.dataset.k=k;b.onclick=()=>setTool(k);tb.appendChild(b);}
+function setTool(k){tool=k;draft=[];for(const b of tb.children)b.classList.toggle('on',b.dataset.k===k);
+  $('finishPoly').style.display=k==='obs'?'block':'none';
+  const m={select:'Drag any marker or polygon vertex. Click a drop point to select that robot.',launch:'Click to place the quadrotor launch point.',collect:'Click to place the collection point.',
+    drop:'Click to add a drop point (one robot per drop point).',wp:'Click to append a waypoint to the selected robot; they are visited in order.',
+    obs:'Click vertices; click the first vertex or “Close polygon” to finish.',del:'Click a drop point, waypoint or obstacle to remove it.'};
+  $('msg').textContent=m[k];redraw();}
+function invalidate(){dirty=true;if(run){run=null;gpr=null;playing=false;$('playBtn').disabled=true;$('resetBtn').disabled=true;$('pinBtn').disabled=true;$('tSlider').disabled=true;$('stat').textContent='Scenario edited — press “Run simulation”.';$('kpi').innerHTML='';}redraw();}
+function replan(){if(!dirty)return;dirty=false;const P=readP();grids=Core.buildGrids(S.obstacles,P.clearance);stagesPrev=S.robots.map(r=>Core.planStages(grids,r,S.collect));}
+
+/* canvases */
+const cvL=$('cvLive'),cvT=$('cvTruth'),cvE=$('cvEst');const SC=cvL.width/W;
+const w2c=(x,y)=>[x*SC,(W-y)*SC];
+function evW(cv,e){const r=cv.getBoundingClientRect();return {x:(e.clientX-r.left)*W/r.width,y:W-(e.clientY-r.top)*W/r.height};}
+function hit(p){const tol=7*W/cvL.getBoundingClientRect().width;
+  for(let i=0;i<S.robots.length;i++)for(let k=0;k<S.robots[i].wps.length;k++)if(Math.hypot(p.x-S.robots[i].wps[k].x,p.y-S.robots[i].wps[k].y)<tol)return {kind:'wp',i,k};
+  for(let i=0;i<S.robots.length;i++)if(Math.hypot(p.x-S.robots[i].x,p.y-S.robots[i].y)<tol*1.3)return {kind:'drop',i};
+  if(Math.hypot(p.x-S.launch.x,p.y-S.launch.y)<tol*1.3)return {kind:'launch'};
+  if(Math.hypot(p.x-S.collect.x,p.y-S.collect.y)<tol*1.3)return {kind:'collect'};
+  for(let i=0;i<S.obstacles.length;i++)for(let k=0;k<S.obstacles[i].length;k++)if(Math.hypot(p.x-S.obstacles[i][k].x,p.y-S.obstacles[i][k].y)<tol)return {kind:'vtx',i,k};
+  for(let i=0;i<S.obstacles.length;i++)if(Core.pip(S.obstacles[i],p.x,p.y))return {kind:'poly',i};
+  return null;}
+let drag=null;
+cvL.addEventListener('pointerdown',e=>{const p=evW(cvL,e);const h=hit(p);const cl=v=>Math.max(1,Math.min(W-1,v));p.x=cl(p.x);p.y=cl(p.y);
+  if(tool==='select'){if(h&&h.kind==='drop'){sel=h.i;}if(h&&h.kind!=='poly'){drag=h;cvL.setPointerCapture(e.pointerId);}else if(h&&h.kind==='poly'){drag={...h,last:p};cvL.setPointerCapture(e.pointerId);}redraw();}
+  else if(tool==='launch'){S.launch={x:p.x,y:p.y};invalidate();}
+  else if(tool==='collect'){S.collect={x:p.x,y:p.y};invalidate();}
+  else if(tool==='drop'){S.robots.push({x:p.x,y:p.y,wps:[]});sel=S.robots.length-1;invalidate();}
+  else if(tool==='wp'){if(h&&h.kind==='drop'){sel=h.i;redraw();}else if(sel>=0&&S.robots[sel]){S.robots[sel].wps.push({x:p.x,y:p.y});invalidate();}else $('msg').textContent='Select a robot first (click its drop point).';}
+  else if(tool==='obs'){if(draft.length>=3&&Math.hypot(p.x-draft[0].x,p.y-draft[0].y)<6)finishPoly();else{draft.push({x:p.x,y:p.y});redraw();}}
+  else if(tool==='del'){if(!h)return;
+    if(h.kind==='drop'){S.robots.splice(h.i,1);sel=Math.min(sel,S.robots.length-1);}else if(h.kind==='wp')S.robots[h.i].wps.splice(h.k,1);
+    else if(h.kind==='poly'||h.kind==='vtx')S.obstacles.splice(h.i,1);invalidate();}});
+cvL.addEventListener('pointermove',e=>{if(!drag)return;const p=evW(cvL,e);const cl=v=>Math.max(1,Math.min(W-1,v));
+  if(drag.kind==='drop'){S.robots[drag.i].x=cl(p.x);S.robots[drag.i].y=cl(p.y);}
+  else if(drag.kind==='wp'){const w=S.robots[drag.i].wps[drag.k];w.x=cl(p.x);w.y=cl(p.y);}
+  else if(drag.kind==='launch'){S.launch={x:cl(p.x),y:cl(p.y)};}else if(drag.kind==='collect'){S.collect={x:cl(p.x),y:cl(p.y)};}
+  else if(drag.kind==='vtx'){const v=S.obstacles[drag.i][drag.k];v.x=cl(p.x);v.y=cl(p.y);}
+  else if(drag.kind==='poly'){const dx=p.x-drag.last.x,dy=p.y-drag.last.y;for(const v of S.obstacles[drag.i]){v.x+=dx;v.y+=dy;}drag.last=p;}
+  dirty=true;redraw();});
+cvL.addEventListener('pointerup',()=>{if(drag){drag=null;invalidate();}});
+function finishPoly(){if(draft.length>=3){S.obstacles.push(draft);}draft=[];invalidate();}
+$('finishPoly').onclick=finishPoly;
+addEventListener('keydown',e=>{if(e.key==='Escape'){draft=[];redraw();}if(e.key==='Enter'&&tool==='obs')finishPoly();});
+
+/* layouts */
+$('applyLayout').onclick=()=>{const n=Math.max(1,Math.min(12,parseInt($('layoutN').value)||4)),kind=$('layoutKind').value,pts=[];
+  for(let i=0;i<n;i++){const u=n===1?.5:i/(n-1);
+    if(kind==='line')pts.push({x:15,y:25+150*u});
+    else if(kind==='spread'){const c=Math.ceil(Math.sqrt(n));pts.push({x:30+140*((i%c)+.5)/c,y:30+140*(Math.floor(i/c)+.5)/Math.ceil(n/c)});}
+    else if(kind==='cluster'){const a=i*2.4,r=4+6*Math.sqrt(i);pts.push({x:35+r*Math.cos(a),y:100+r*Math.sin(a)});}
+    else pts.push({x:100+75*Math.cos(2*Math.PI*i/n+.4),y:100+75*Math.sin(2*Math.PI*i/n+.4)});}
+  const g=Core.buildGrids(S.obstacles,3);
+  S.robots=pts.map(p=>{const c=Core.nearestFree(g.free,p.x,p.y)||[p.x,p.y];return {x:c[0]+.5,y:c[1]+.5,wps:[]};});sel=0;invalidate();};
+
+/* export / import */
+$('expBtn').onclick=()=>{$('json').value=JSON.stringify({scenario:S,params:Object.fromEntries(PDEF.map(d=>[d[0],parseFloat($('p_'+d[0]).value)]))});};
+$('impBtn').onclick=()=>{try{const o=JSON.parse($('json').value);if(!o.scenario)throw 0;S=o.scenario;
+  for(const k in (o.params||{})){const el=$('p_'+k);if(el)el.value=o.params[k];}sel=0;invalidate();$('msg').textContent='Imported.';}catch(e){$('msg').textContent='Could not parse JSON.';}};
+
+/* color maps */
+function lerpStops(stops,u){u=Math.max(0,Math.min(1,u))*(stops.length-1);const i=Math.min(stops.length-2,Math.floor(u)),f=u-i,a=stops[i],b=stops[i+1];return [a[0]+f*(b[0]-a[0]),a[1]+f*(b[1]-a[1]),a[2]+f*(b[2]-a[2])];}
+const VIR=[[253,231,37],[94,201,98],[33,145,140],[59,82,139],[68,1,84]]; // shallow (yellow) → deep (purple)
+const MAG=[[0,0,4],[81,18,124],[183,55,121],[252,137,97],[252,253,191]];
+function offscreen(w,h){const c=document.createElement('canvas');c.width=w;c.height=h;return c;}
+function truthImage(truth){const c=offscreen(200,200),x=c.getContext('2d'),im=x.createImageData(200,200);
+  for(let j=0;j<200;j++)for(let i=0;i<200;i++){const d=truth.depth(i+.5,j+.5),rgb=lerpStops(VIR,(d-truth.dmin)/(truth.dmax-truth.dmin)),o=((199-j)*200+i)*4;im.data[o]=rgb[0];im.data[o+1]=rgb[1];im.data[o+2]=rgb[2];im.data[o+3]=255;}
+  x.putImageData(im,0,0);return c;}
+function getTruth(P){if(truthSeed!==P.seed){truthSeed=P.seed;const t=Core.makeTruth(P.seed);truthCache={t,img:truthImage(t)};}return truthCache;}
+
+/* drawing helpers */
+function drawObstacles(c){for(const o of S.obstacles){c.beginPath();o.forEach((p,i)=>{const q=w2c(p.x,p.y);i?c.lineTo(q[0],q[1]):c.moveTo(q[0],q[1]);});c.closePath();c.fillStyle='#c9b48a';c.fill();c.strokeStyle='#7a6a45';c.lineWidth=1.5;c.stroke();}}
+function drawMarkers(c,showLabels){
+  let q=w2c(S.launch.x,S.launch.y);c.fillStyle='#fff';c.strokeStyle='#0e2a3b';c.lineWidth=2;c.beginPath();c.arc(q[0],q[1],11,0,7);c.fill();c.stroke();c.fillStyle='#0e2a3b';c.font='bold 13px system-ui';c.textAlign='center';c.textBaseline='middle';c.fillText('H',q[0],q[1]+.5);
+  q=w2c(S.collect.x,S.collect.y);c.strokeStyle='#d81159';c.lineWidth=2.5;for(const r of [12,6]){c.beginPath();c.arc(q[0],q[1],r,0,7);c.stroke();}
+  const cr=Core.W&&4*SC;c.setLineDash([3,3]);c.lineWidth=1;c.beginPath();c.arc(q[0],q[1],cr,0,7);c.stroke();c.setLineDash([]);
+  S.robots.forEach((r,i)=>{const q=w2c(r.x,r.y),col=COL[i%COL.length];c.fillStyle=col;c.strokeStyle=i===sel&&showLabels?'#000':'#fff';c.lineWidth=i===sel&&showLabels?3:2;
+    c.beginPath();c.arc(q[0],q[1],7,0,7);c.fill();c.stroke();
+    if(showLabels){c.fillStyle='#fff';c.font='bold 10px system-ui';c.textAlign='center';c.textBaseline='middle';c.fillText(String(i+1),q[0],q[1]+.5);}
+    r.wps.forEach((w,k)=>{const p=w2c(w.x,w.y);c.fillStyle=col;c.strokeStyle='#fff';c.lineWidth=1.5;c.beginPath();c.moveTo(p[0],p[1]-7);c.lineTo(p[0]+7,p[1]);c.lineTo(p[0],p[1]+7);c.lineTo(p[0]-7,p[1]);c.closePath();c.fill();c.stroke();
+      if(showLabels){c.fillStyle='#fff';c.font='bold 9px system-ui';c.textBaseline='middle';c.fillText(String(k+1),p[0],p[1]+.5);}});});}
+function polyline(c,pts,col,w,dash){c.beginPath();pts.forEach((p,i)=>{const q=w2c(p.x,p.y);i?c.lineTo(q[0],q[1]):c.moveTo(q[0],q[1]);});c.strokeStyle=col;c.lineWidth=w;c.setLineDash(dash||[]);c.stroke();c.setLineDash([]);}
+function colorbar(c,lo,hi,stops,label){const x=14,y=cvL.height-26,w=150,h=10;const g=c.createLinearGradient(x,0,x+w,0);
+  for(let i=0;i<=10;i++){const rgb=lerpStops(stops,i/10);g.addColorStop(i/10,`rgb(${rgb[0]|0},${rgb[1]|0},${rgb[2]|0})`);}
+  c.fillStyle='rgba(255,255,255,.75)';c.fillRect(x-6,y-16,w+12,38);c.fillStyle=g;c.fillRect(x,y,w,h);c.fillStyle='#000';c.font='11px system-ui';c.textAlign='left';c.textBaseline='alphabetic';
+  c.fillText(lo.toFixed(1),x,y+21);c.textAlign='right';c.fillText(hi.toFixed(1)+' m',x+w,y+21);c.textAlign='center';c.fillText(label,x+w/2,y-4);}
+function robotAt(rb,t){if(t<rb.t0)return null;const f=(t-rb.t0)/.5,i=Math.min(rb.xs.length-1,Math.floor(f)),j=Math.min(rb.xs.length-1,i+1),u=Math.min(1,f-i);
+  if(rb.xs.length===0)return null;return {x:rb.xs[i]+u*(rb.xs[j]-rb.xs[i]),y:rb.ys[i]+u*(rb.ys[j]-rb.ys[i]),psi:rb.ps[i],i};}
+function quadAt(q,t){const f=t/q.dt,i=Math.min(q.t.length-1,Math.floor(f)),j=Math.min(q.t.length-1,i+1),u=Math.min(1,f-i),l=(a)=>a[i]+u*(a[j]-a[i]);
+  return {x:l(q.x),y:l(q.y),z:l(q.z),ph:q.ph[i],E:l(q.E)};}
+
+const covImg=offscreen(200,200),covCtx=covImg.getContext('2d'),estImg=offscreen(50,50),estCtx=estImg.getContext('2d');
+
+function drawLive(){const P=readP(),c=cvL.getContext('2d'),T=getTruth(P);
+  c.setTransform(1,0,0,1,0,0);c.clearRect(0,0,cvL.width,cvL.height);c.fillStyle='#d6e9f2';c.fillRect(0,0,cvL.width,cvL.height);
+  c.imageSmoothingEnabled=false;
+  if(run){const im=covCtx.createImageData(200,200),f=run.cov.first;
+    for(let j=0;j<200;j++)for(let i=0;i<200;i++){if(f[j*200+i]<=tNow){const o=((199-j)*200+i)*4;im.data[o]=30;im.data[o+1]=140;im.data[o+2]=170;im.data[o+3]=120;}}
+    covCtx.putImageData(im,0,0);c.drawImage(covImg,0,0,cvL.width,cvL.height);}
+  drawObstacles(c);
+  // planned paths (dashed)
+  (run?run.stages:stagesPrev||[]).forEach((st,i)=>{const col=COL[i%COL.length];st.forEach(L=>polyline(c,L.pts,col,1.3,[5,4]));});
+  if(!run){// quad tour preview
+    const tour=[],rem=S.robots.map((_,i)=>i);let cur=S.launch;while(rem.length){let bi=0,bd=1e9;rem.forEach((ri,k)=>{const d=Math.hypot(S.robots[ri].x-cur.x,S.robots[ri].y-cur.y);if(d<bd){bd=d;bi=k;}});const ri=rem.splice(bi,1)[0];tour.push(S.robots[ri]);cur=S.robots[ri];}
+    polyline(c,[S.launch,...tour,S.launch],'rgba(14,42,59,.45)',1.2,[2,4]);}
+  if(run){const tb=Math.tan(P.beam*Math.PI/360);
+    run.robots.forEach((rb,i)=>{const col=COL[i%COL.length],n=Math.max(0,Math.min(rb.xs.length,Math.floor((tNow-rb.t0)/.5)+1)),pts=[];for(let k=0;k<n;k++)pts.push({x:rb.xs[k],y:rb.ys[k]});
+      const st=robotAt(rb,tNow);if(st)pts.push(st);if(pts.length>1)polyline(c,pts,col,2.2);
+      if(st&&!(rb.collected&&tNow>=rb.tDone)){const q=w2c(st.x,st.y),r=T.t.depth(st.x,st.y)*tb*SC;c.strokeStyle=col;c.lineWidth=1;c.beginPath();c.arc(q[0],q[1],r,0,7);c.stroke();}
+      if(st){const q=w2c(st.x,st.y);c.save();c.translate(q[0],q[1]);c.rotate(-st.psi);c.fillStyle=col;c.strokeStyle='#fff';c.lineWidth=1.5;c.beginPath();c.moveTo(9,0);c.lineTo(-6,5);c.lineTo(-6,-5);c.closePath();c.fill();c.stroke();c.restore();}
+      else{const dep=S.robots[i];if(tNow>=run.quad.release[i]){const q=w2c(dep.x,dep.y);c.strokeStyle=col;c.lineWidth=2;c.setLineDash([2,3]);c.beginPath();c.arc(q[0],q[1],9,0,7);c.stroke();c.setLineDash([]);}}});
+  }
+  drawMarkers(c,true);
+  if(draft.length){polyline(c,draft,'#7a6a45',2,[4,3]);for(const p of draft){const q=w2c(p.x,p.y);c.fillStyle='#7a6a45';c.beginPath();c.arc(q[0],q[1],4,0,7);c.fill();}}
+  if(run){const q=quadAt(run.quad,tNow),p=w2c(q.x,q.y),sc=1+q.z/60;
+    c.fillStyle='rgba(0,0,0,.18)';c.beginPath();c.arc(p[0],p[1],7,0,7);c.fill();
+    c.save();c.translate(p[0]-q.z*.15,p[1]-q.z*.3);c.strokeStyle='#0e2a3b';c.lineWidth=2.5;
+    for(const [a,b] of [[1,1],[1,-1],[-1,1],[-1,-1]]){c.beginPath();c.moveTo(0,0);c.lineTo(a*9*sc,b*9*sc);c.stroke();c.fillStyle='rgba(14,42,59,.35)';c.beginPath();c.arc(a*9*sc,b*9*sc,5*sc,0,7);c.fill();}
+    c.fillStyle='#0e2a3b';c.beginPath();c.arc(0,0,4,0,7);c.fill();c.restore();}
+}
+function drawTruth(){const P=readP(),T=getTruth(P),c=cvT.getContext('2d');c.imageSmoothingEnabled=true;c.drawImage(T.img,0,0,cvT.width,cvT.height);drawObstacles(c);colorbar(c,T.t.dmin,T.t.dmax,VIR,'depth');
+  if(run){const q=(a)=>a;c.lineWidth=1;run.robots.forEach((rb,i)=>{polyline(c,rb.xs.map((x,k)=>({x,y:rb.ys[k]})).slice(0,Math.max(0,Math.floor((tNow-rb.t0)/.5)+1)),'rgba(255,255,255,.85)',1.3);});}}
+function drawEst(){const P=readP(),T=getTruth(P),c=cvE.getContext('2d');c.setTransform(1,0,0,1,0,0);c.clearRect(0,0,cvE.width,cvE.height);
+  if(!run||!gpr||!gpr.maps.length){c.fillStyle='#e8eef2';c.fillRect(0,0,cvE.width,cvE.height);c.fillStyle='#66758a';c.font='15px system-ui';c.textAlign='center';c.fillText(busy?'Fitting GP…':'Run the simulation to see the GP regression',cvE.width/2,cvE.height/2);drawObstacles(c);return;}
+  let k=0;while(k+1<gpr.tk.length&&gpr.tk[k+1]<=tNow)k++;
+  const m=gpr.maps[k],gx=gpr.gx,im=estCtx.createImageData(gx,gx);
+  const emax=Math.max(1,.3*(T.t.dmax-T.t.dmin));
+  for(let j=0;j<gx;j++)for(let i=0;i<gx;i++){const v=m[j*gx+i],o=((gx-1-j)*gx+i)*4;let rgb;
+    if(view==='est')rgb=lerpStops(VIR,(v-T.t.dmin)/(T.t.dmax-T.t.dmin));else rgb=lerpStops(MAG,Math.abs(v-gpr.truthG[j*gx+i])/emax);
+    im.data[o]=rgb[0];im.data[o+1]=rgb[1];im.data[o+2]=rgb[2];im.data[o+3]=255;}
+  estCtx.putImageData(im,0,0);c.imageSmoothingEnabled=true;c.drawImage(estImg,0,0,cvE.width,cvE.height);drawObstacles(c);
+  c.fillStyle=view==='est'?'rgba(255,255,255,.9)':'rgba(255,255,255,.9)';c.strokeStyle='rgba(0,0,0,.55)';c.lineWidth=.8;
+  const used=gpr.used[k];for(let i=0;i<used;i++){const s=gpr.accepted[i],q=w2c(s.x,s.y);c.beginPath();c.arc(q[0],q[1],1.6,0,7);c.fill();}
+  if(view==='est')colorbar(c,T.t.dmin,T.t.dmax,VIR,'estimated depth');else colorbar(c,0,emax,MAG,'|error|');
+  $('estTitle').textContent=(view==='est'?'GP estimate':'|GP − truth|')+` · ${used} pts used`;}
+
+/* plots */
+const css=getComputedStyle(document.documentElement);
+function plot(cv,series,tMax,yMax,yfmt){const dpr=window.devicePixelRatio||1,w=cv.clientWidth,h=cv.clientHeight;if(!w)return;
+  if(cv.width!==Math.round(w*dpr)||cv.height!==Math.round(h*dpr)){cv.width=Math.round(w*dpr);cv.height=Math.round(h*dpr);}
+  const c=cv.getContext('2d');c.setTransform(dpr,0,0,dpr,0,0);c.clearRect(0,0,w,h);
+  const m={l:48,r:12,t:10,b:30},X=t=>m.l+(w-m.l-m.r)*t/tMax,Y=v=>h-m.b-(h-m.t-m.b)*v/yMax;
+  c.font='11px system-ui';c.fillStyle='#66758a';c.strokeStyle='#e3e8ee';c.lineWidth=1;c.textBaseline='middle';c.textAlign='right';
+  for(let i=0;i<=5;i++){const v=yMax*i/5;c.beginPath();c.moveTo(m.l,Y(v));c.lineTo(w-m.r,Y(v));c.stroke();c.fillText(yfmt(v),m.l-5,Y(v));}
+  c.textAlign='center';c.textBaseline='top';const nt=Math.min(8,Math.max(2,Math.floor(w/70)));
+  for(let i=0;i<=nt;i++){const t=tMax*i/nt;c.fillText(Math.round(t),X(t),h-m.b+6);}c.fillText('time [s]',(m.l+w-m.r)/2,h-14);
+  for(const s of series){c.beginPath();let first=true;for(let i=0;i<s.xs.length;i++){if(s.upto!=null&&s.xs[i]>s.upto)break;const px=X(s.xs[i]),py=Y(s.ys[i]);first?c.moveTo(px,py):c.lineTo(px,py);first=false;}
+    c.strokeStyle=s.color;c.lineWidth=s.dash?1.8:2.4;c.setLineDash(s.dash||[]);c.stroke();c.setLineDash([]);}
+  if(series.length&&series[0].upto!=null){c.strokeStyle='rgba(0,0,0,.35)';c.lineWidth=1;c.beginPath();c.moveTo(X(Math.min(tMax,tNow)),m.t);c.lineTo(X(Math.min(tMax,tNow)),h-m.b);c.stroke();}
+  // legend
+  c.textAlign='left';c.textBaseline='middle';let ly=m.t+8;for(const s of series){if(!s.label)continue;c.strokeStyle=s.color;c.lineWidth=2.4;c.setLineDash(s.dash||[]);c.beginPath();c.moveTo(w-m.r-150,ly);c.lineTo(w-m.r-130,ly);c.stroke();c.setLineDash([]);c.fillStyle='#1c2733';c.fillText(s.label,w-m.r-124,ly);ly+=15;}}
+function drawPlots(){
+  const sc=[],sm=[];let tMax=run?run.T:600,yM=1;
+  for(const p of pins){sc.push({xs:p.covT,ys:p.cov,color:p.color,dash:[6,4],label:p.name+` (${p.cov[p.cov.length-1].toFixed(0)}%)`});sm.push({xs:p.meT,ys:p.me,color:p.color,dash:[6,4],label:p.name+` (${p.me[p.me.length-1].toFixed(2)} m)`});tMax=Math.max(tMax,p.covT[p.covT.length-1]);}
+  if(run){sc.push({xs:run.cov.t,ys:run.cov.pct,color:'#e4572e',upto:tNow,label:'current run'});}
+  if(run&&gpr&&gpr.me.length)sm.push({xs:gpr.tk,ys:gpr.me,color:'#e4572e',upto:tNow,label:'current run'});
+  for(const s of sm)for(const v of s.ys)yM=Math.max(yM,v);
+  const covMax=Math.max(10,Math.ceil(Math.max(0,...sc.flatMap(s=>s.ys))/10)*10);
+  plot($('plCov'),sc,tMax,covMax,v=>v.toFixed(0)+'%');plot($('plME'),sm,tMax,Math.ceil(yM*5)/5,v=>v.toFixed(2));}
+
+function status(){if(!run){return;}const P=run.P,q=quadAt(run.quad,tNow);
+  const act=run.robots.filter(r=>tNow>=r.t0&&!(r.collected&&tNow>=r.tDone)).length,got=run.robots.filter(r=>r.collected&&tNow>=r.tDone).length;
+  const usable=.8*FIXED.battery;
+  $('stat').innerHTML=`t = <b>${tNow.toFixed(0)}</b> / ${run.T} s · Quad: <b>${q.ph}</b>, alt ${q.z.toFixed(0)} m, ${q.E.toFixed(1)} Wh used · Robots: ${act} swimming, ${got}/${run.robots.length} collected`;
+  const k=Math.max(0,Math.min(run.cov.pct.length-1,Math.floor(tNow))),cov=run.cov.pct[k];let me='–';
+  if(gpr&&gpr.me.length){let j=0;while(j+1<gpr.tk.length&&gpr.tk[j+1]<=tNow)j++;me=gpr.me[j].toFixed(2);}
+  const col=run.robots.reduce((a,r)=>a+r.collisions,0),nc=run.robots.length-got;
+  $('kpi').innerHTML=`<div><b>${cov.toFixed(1)} %</b><span>coverage</span></div><div><b>${me} m</b><span>mapping error (RMSE)</span></div>
+   <div><b class="${run.quad.Ewh>usable?'warn':''}">${run.quad.Ewh.toFixed(1)} Wh</b><span>quad energy for whole sortie (usable ≈ ${usable.toFixed(0)} Wh)</span></div>
+   <div><b>${(run.quad.tEnd/60).toFixed(1)} min</b><span>quad flight time</span></div>
+   <div><b class="${nc?'warn':''}">${nc?got+'/'+run.robots.length+' collected':'all collected'}</b><span>${col} obstacle contacts</span></div>`;}
+
+function redraw(){replan();drawLive();drawTruth();drawEst();drawPlots();status();}
+
+/* run */
+$('runBtn').onclick=async()=>{if(busy)return;if(!S.robots.length){$('msg').textContent='Add at least one drop point.';return;}
+  busy=true;$('runBtn').disabled=true;$('msg').textContent='Simulating…';playing=false;
+  await new Promise(r=>setTimeout(r,20));
+  const P=readP();let r;try{r=Core.prepare(P,S);}catch(e){console.error(e);$('msg').textContent='Error: '+e.message;busy=false;$('runBtn').disabled=false;return;}
+  run=r;gpr=new Core.GPRun(run);tNow=0;redraw();
+  const slider=$('tSlider');slider.max=run.T;
+  while(!gpr.done){const t0=performance.now();let p=0;while(!gpr.done&&performance.now()-t0<30)p=gpr.step();$('msg').textContent=`Fitting GP… ${(100*p).toFixed(0)}%`;await new Promise(r=>setTimeout(r));}
+  $('msg').textContent='Done.';busy=false;$('runBtn').disabled=false;
+  $('playBtn').disabled=false;$('resetBtn').disabled=false;$('pinBtn').disabled=false;slider.disabled=false;playing=true;$('playBtn').textContent='Pause';last=performance.now();requestAnimationFrame(loop);redraw();};
+let last=0;
+function loop(now){if(!run)return;if(playing){const sp=parseFloat($('speed').value);tNow=Math.max(0,Math.min(run.T,tNow+Math.max(0,now-last)/1000*sp));if(tNow>=run.T){playing=false;$('playBtn').textContent='Replay';}$('tSlider').value=tNow;redraw();}
+  last=now;if(playing)requestAnimationFrame(loop);}
+$('playBtn').onclick=()=>{if(!run)return;if(tNow>=run.T)tNow=0;playing=!playing;$('playBtn').textContent=playing?'Pause':'Play';last=performance.now();if(playing)requestAnimationFrame(loop);};
+$('resetBtn').onclick=()=>{tNow=0;$('tSlider').value=0;playing=false;$('playBtn').textContent='Play';redraw();};
+$('tSlider').oninput=e=>{tNow=parseFloat(e.target.value);playing=false;$('playBtn').textContent='Play';redraw();};
+$('pinBtn').onclick=()=>{if(!run||!gpr||!gpr.done)return;
+  if(pins.length&&pins[0].seed!==run.P.seed){pins=[];}
+  pinN++;pins.push({name:'Run '+pinN,seed:run.P.seed,covT:run.cov.t.slice(),cov:run.cov.pct.slice(),meT:gpr.tk.slice(),me:gpr.me.slice(),color:PIN_COL[(pinN-1)%PIN_COL.length]});redraw();};
+$('clearPins').onclick=()=>{pins=[];pinN=0;redraw();};
+$('vEst').onclick=()=>{view='est';$('vEst').classList.add('on');$('vErr').classList.remove('on');redraw();};
+$('vErr').onclick=()=>{view='err';$('vErr').classList.add('on');$('vEst').classList.remove('on');redraw();};
+params.addEventListener('change',()=>{invalidate();});
+addEventListener('resize',redraw);
+setTool('select');
+window.__app={S:()=>S,run:()=>run,gpr:()=>gpr};
+})();
+</script>
+</body>
+</html>
