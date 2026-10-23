@@ -45,6 +45,10 @@ details summary{cursor:pointer;font-weight:600;font-size:13px;margin:2px 0}
 .kpi div span{font-size:11.5px;color:var(--mute)}
 textarea{width:100%;height:80px;font:11px monospace}
 .warn{color:#b3261e}
+.theory{line-height:1.55;font-size:14.5px;max-width:880px}
+.theory h2{margin:0 0 4px;font-size:20px}.theory h3{margin:22px 0 6px;font-size:16px;color:var(--accent)}
+.theory .lead{color:var(--mute)}.theory .eq{font-family:Georgia,"Times New Roman",serif;font-size:16px;background:#f1f5f8;border-left:3px solid var(--accent);padding:6px 12px;margin:8px 0;overflow-x:auto}
+.theory svg{display:block;margin:6px 0}.theory li{margin:3px 0}
 .locked #app{display:none}
 </style>
 </head>
@@ -124,13 +128,100 @@ textarea{width:100%;height:80px;font:11px monospace}
     <div class="card"><h3>Coverage (% of free area swept by sensor footprint)</h3><canvas id="plCov"></canvas></div>
     <div class="card"><h3>Mapping error ME = RMSE(GP mean − truth) [m]</h3><canvas id="plME"></canvas></div>
   </div>
-  <div class="card" style="font-size:12.5px;color:var(--mute)">
-    <b style="color:var(--ink)">Model notes.</b>
-    Quadrotor: trapezoidal horizontal profile (accel-limited), hover power scaled with payload mass (P ∝ m^1.5), robots descend on a small drogue.
-    Marine robot: unicycle with first-order motor/yaw lag, bounded turn rate, ocean-current drift, OU yaw/speed noise; A* planning on obstacle-inflated grid, pure-pursuit tracking, next waypoint becomes active when the current one is reached.
-    Footprint radius r = depth · tan(β/2) (β = full beam angle). Sensor samples depth at the robot position at the chosen rate (+ Gaussian noise). GP: squared-exponential kernel, fixed hyper-parameters, incremental Cholesky; samples closer than ℓ/20 to an already-used one are skipped to bound cost.
-    Robots do not avoid one another. Bathymetry is synthetic (seeded).
-  </div>
+  <section class="card theory" id="theory">
+<h2>The theory behind what you just watched</h2>
+<p class="lead">No background assumed. Each part below matches something on the screen, and every equation is explained in words first.</p>
+
+<h3>0 · The big picture</h3>
+<p>We want a <b>map of the sea floor</b> (the <i>bathymetry</i>) but we can only measure depth at the places our robots actually swim. So two questions matter: <b>(1) how much of the area did the robots sweep?</b> (<i>coverage</i>) and <b>(2) how good is the map we can build from those few measurements?</b> (<i>mapping error</i>). Changing where the quadrotor drops the robots changes both, which is what you can explore here.</p>
+
+<h3>1 · Getting the robots there: the quadrotor</h3>
+<p>A quadrotor stays in the air by pushing air downward with four propellers. To <b>hover</b> the total thrust must equal the weight, <i>T = m g</i>. Heavier aircraft need more thrust, and the power needed grows faster than the mass: roughly <i>P ∝ m<sup>3/2</sup></i>. That is why the model charges more power when the quad is carrying all its robots and less after each release.</p>
+<ul>
+<li><b>Energy vs. power.</b> Power (watts) is how fast energy is used. Energy (watt-hours) = power × time. A battery stores a fixed amount of energy (here about 74 Wh), so flying longer or heavier uses a bigger fraction of it. We only plan to use about 80%, to keep a safety reserve.</li>
+<li><b>Speed profile.</b> A drone cannot change speed instantly. It speeds up at a limited acceleration (2 m/s²), cruises, then slows down. Plotted as speed against time this makes a trapezoid, so a short hop never reaches full cruise speed.</li>
+<li><b>Flight phases.</b> spin-up, climb to release altitude, transit, hover and release, return, descend, land. The panel above the plots tells you which phase it is in.</li>
+<li><b>Release.</b> The robots fall slowly under a small drogue (about 5 m/s), so a 30 m drop takes about 6 s, plus a few seconds to settle on the water before they start swimming.</li>
+</ul>
+
+<h3>2 · Moving a tiny boat: how the robots swim</h3>
+<p>Each robot is modelled like a <b>toy car</b> (a <i>unicycle</i>): it has a <b>heading</b> ψ (the direction it points), a <b>forward speed</b> <i>v</i> and a <b>turn rate</b> ω. Its position changes as</p>
+<p class="eq">ẋ = v cos ψ + c<sub>x</sub>, &nbsp; ẏ = v sin ψ + c<sub>y</sub>, &nbsp; ψ̇ = ω</p>
+<p>(a dot means “rate of change per second”). The terms <i>c<sub>x</sub>, c<sub>y</sub></i> are the water <b>current</b>, which pushes the robot sideways whether it likes it or not.</p>
+<p>The robot controller does not set <i>v</i> and ω directly. It asks for a speed and a turn rate, and the tiny DC motors take time to respond because propellers and motors have inertia. A <b>first-order lag</b> captures this:</p>
+<p class="eq">v̇ = (v<sub>cmd</sub> − v) / τ</p>
+<p>In words: each second, the speed closes a fraction 1/τ of its gap to the requested value (τ is the time constant, here about 2 s for speed and 0.7 s for turning). That is why the paths are smooth and the boats loop through corners instead of snapping. Small random <b>noise</b> in heading and speed adds the wobble you see in real vehicles.</p>
+
+<h3>3 · Finding a path around obstacles</h3>
+<p><b>Grid and obstacles.</b> The area is chopped into 1 m × 1 m cells, and each cell is either water or blocked (land or an obstacle polygon). Obstacles are <b>inflated</b> by a 3 m safety margin so the planned line keeps clear of them, since the real boat will not follow it perfectly.</p>
+<p><b>A* search.</b> To get from A to B the planner explores cells and keeps, for each, <i>f = g + h</i>: <i>g</i> is the distance already travelled to reach it, <i>h</i> is a cheap optimistic guess of the distance still to go (straight line). It always expands the cell with the smallest <i>f</i>, so it heads toward the goal but can still go around walls. A final pass removes unnecessary zig-zags, leaving the dashed lines you see.</p>
+<p><b>Waypoints.</b> If you add waypoints, the robot treats them as a to-do list: the first one is the goal; when the robot gets within a few metres of it, the next one becomes active, and so on until the collection point.</p>
+<p><b>Following the path (pure pursuit).</b> The robot looks at a point a few metres <i>ahead</i> on the path and steers toward it, like a driver looking down the road instead of at the bumper. The steering command is proportional to the angle error between where it points and where that point is.</p>
+
+<h3>4 · The sonar footprint</h3>
+<p>Each robot carries a downward-looking sonar. Sound spreads out in a <b>cone</b> of full angle β, so the patch of sea floor it “sees” is a circle whose radius grows with depth <i>d</i>:</p>
+<p class="eq">r = d · tan(β / 2)</p>
+<svg viewBox="0 0 320 170" style="max-width:420px;width:100%" role="img" aria-label="Sonar cone geometry">
+<rect x="0" y="40" width="320" height="2" fill="#0b6e99"/><rect x="50" y="30" width="30" height="10" fill="#e4572e"/><text x="52" y="24" font-size="11" fill="#e4572e">robot</text>
+<path d="M0 150 Q80 140 160 152 T320 148" stroke="#8b6b3d" stroke-width="3" fill="none"/>
+<polygon points="65,42 125,148 5,148" fill="#0b6e99" opacity=".18"/>
+<line x1="65" y1="42" x2="65" y2="148" stroke="#66758a" stroke-dasharray="3 3"/><text x="70" y="100" font-size="12" fill="#1c2733">depth d</text>
+<line x1="5" y1="160" x2="125" y2="160" stroke="#e4572e"/><text x="65" y="170" font-size="12" text-anchor="middle" fill="#e4572e">swath width = 2r</text>
+<text x="135" y="70" font-size="12" fill="#1c2733">β = full cone angle at the robot</text>
+</svg>
+<p>Deep water gives a wide footprint, shallow water a narrow one. Two things to try: widen the beam angle and watch coverage climb faster, and note that boats in deeper parts of the map sweep more area per metre travelled.</p>
+
+<h3>5 · Metric 1: coverage</h3>
+<p>Every ~half second each robot “paints” the circle under it on the grid. Coverage is the share of all water cells that have been painted at least once:</p>
+<p class="eq">coverage (%) = 100 × (cells swept) / (all water cells)</p>
+<p>Cells under obstacles and land are not counted. Coverage can only go up. It is the teal shading on the mission map. High coverage means you have <i>looked</i> at a lot of the area. It does not by itself say how well you can reconstruct the map, which is metric 2.</p>
+
+<h3>6 · Metric 2: mapping error, via a Gaussian process</h3>
+<p><b>The problem.</b> The robots measure depth at a few thousand points, but we want depth <i>everywhere</i>. We need to guess the depth between and beyond the measurements. The key physical fact: <b>sea floors are smooth</b>. Two places 1 m apart almost surely have nearly the same depth. Two places 100 m apart may not.</p>
+<p><b>The kernel.</b> A Gaussian process (GP) turns that fact into a formula. The <i>kernel</i> says how similar the depths at two places are as a function of their distance <i>Δ</i>:</p>
+<p class="eq">k(Δ) = σ<sub>f</sub>² · exp( −Δ² / (2ℓ²) )</p>
+<p>Similarity starts at its maximum for Δ = 0 and falls smoothly. The <b>length-scale ℓ</b> sets how fast: features smaller than about ℓ are treated as unpredictable, larger ones as learnable. σ<sub>f</sub> says how much the depth typically varies (in metres).</p>
+<svg viewBox="0 0 320 170" role="img" aria-label="Kernel: similarity versus distance" style="max-width:420px;width:100%">
+<polyline points="30.0,30.0 34.5,30.1 39.0,30.5 43.5,31.2 48.0,32.2 52.5,33.4 57.0,34.8 61.5,36.5 66.0,38.5 70.5,40.6 75.0,42.9 79.5,45.4 84.0,48.1 88.5,50.9 93.0,53.9 97.5,57.0 102.0,60.1 106.5,63.4 111.0,66.6 115.5,69.9 120.0,73.3 124.5,76.6 129.0,79.9 133.5,83.2 138.0,86.5 142.5,89.6 147.0,92.7 151.5,95.8 156.0,98.7 160.5,101.6 165.0,104.3 169.5,106.9 174.0,109.4 178.5,111.8 183.0,114.1 187.5,116.2 192.0,118.2 196.5,120.1 201.0,121.9 205.5,123.6 210.0,125.1 214.5,126.5 219.0,127.9 223.5,129.1 228.0,130.2 232.5,131.2 237.0,132.2 241.5,133.0 246.0,133.8 250.5,134.5 255.0,135.2 259.5,135.7 264.0,136.3 268.5,136.7 273.0,137.1 277.5,137.5 282.0,137.8 286.5,138.1 291.0,138.4 295.5,138.6 300.0,138.8" fill="none" stroke="#0b6e99" stroke-width="2.5"/>
+<line x1="30" y1="140" x2="305" y2="140" stroke="#66758a"/><line x1="30" y1="25" x2="30" y2="140" stroke="#66758a"/>
+<line x1="120" y1="140" x2="120" y2="73.3" stroke="#e4572e" stroke-dasharray="4 3"/>
+<text x="120" y="156" font-size="11" text-anchor="middle" fill="#e4572e">ℓ</text><text x="210" y="156" font-size="11" text-anchor="middle" fill="#66758a">2ℓ</text><text x="300" y="156" font-size="11" text-anchor="middle" fill="#66758a">3ℓ</text>
+<text x="36" y="22" font-size="11" fill="#66758a">similarity</text><text x="60" y="168" font-size="11" fill="#66758a">distance between two places →</text>
+</svg>
+<p><b>The estimate.</b> Given measurements <b>y</b> at locations <i>X</i>, the GP predicts depth at a new place <i>x*</i> as the average depth plus a weighted combination of how far each measurement is from that average. Closer, more informative measurements get more weight:</p>
+<p class="eq">ŷ(x*) = ȳ + k(x*, X) · ( K + σ<sub>n</sub>² I )<sup>−1</sup> · ( y − ȳ )</p>
+<p>Here <i>K</i> collects how similar the measurement points are to <i>each other</i> (so two nearly identical measurements are not counted twice), and σ<sub>n</sub> is the sensor noise (the GP will not chase every jitter). Far from any data, the correction fades away and the map falls back to the plain average depth, so unexplored areas look flat. The picture below shows a one-dimensional version: orange dots are measurements, the blue line the estimate, the shaded band the GP’s own uncertainty, which pinches in near data and balloons where there is none.</p>
+<svg viewBox="0 0 340 220" role="img" aria-label="One-dimensional Gaussian process example" style="max-width:520px;width:100%">
+<polygon points="30.0,44.1 32.1,46.6 34.3,49.1 36.4,51.8 38.6,54.6 40.7,57.5 42.9,60.4 45.0,63.3 47.1,66.2 49.3,69.1 51.4,71.7 53.6,73.9 55.7,74.8 57.9,73.8 60.0,71.9 62.1,69.7 64.3,67.7 66.4,65.9 68.6,64.3 70.7,63.0 72.9,62.0 75.0,61.3 77.1,60.8 79.3,60.7 81.4,60.8 83.6,61.2 85.7,61.7 87.9,62.5 90.0,63.5 92.1,64.6 94.3,65.9 96.4,67.2 98.6,68.5 100.7,69.9 102.9,71.2 105.0,72.3 107.1,73.3 109.3,74.0 111.4,74.4 113.6,74.4 115.7,74.3 117.9,74.0 120.0,73.9 122.1,73.9 124.3,74.1 126.4,74.5 128.6,75.0 130.7,75.5 132.9,75.9 135.0,75.9 137.1,75.5 139.3,74.8 141.4,74.0 143.6,73.0 145.7,72.0 147.9,71.0 150.0,70.1 152.1,69.2 154.3,68.4 156.4,67.9 158.6,67.5 160.7,67.3 162.9,67.4 165.0,67.7 167.1,68.4 169.3,69.3 171.4,70.5 173.6,72.1 175.7,74.0 177.9,76.2 180.0,78.7 182.1,81.5 184.3,84.6 186.4,88.0 188.6,91.6 190.7,95.4 192.9,99.4 195.0,103.6 197.1,107.8 199.3,112.2 201.4,116.5 203.6,120.9 205.7,125.2 207.9,129.4 210.0,133.4 212.1,137.2 214.3,140.8 216.4,144.1 218.6,147.1 220.7,149.6 222.9,151.6 225.0,152.7 227.1,152.5 229.3,150.6 231.4,147.6 233.6,144.2 235.7,140.6 237.9,136.9 240.0,133.4 242.1,129.9 244.3,126.6 246.4,123.5 248.6,120.6 250.7,117.9 252.9,115.6 255.0,113.4 257.1,111.6 259.3,110.0 261.4,108.6 263.6,107.1 265.7,104.8 267.9,101.2 270.0,96.6 272.1,91.5 274.3,86.4 276.4,81.3 278.6,76.3 280.7,71.4 282.9,66.6 285.0,62.1 287.1,57.8 289.3,53.7 291.4,49.9 293.6,46.4 295.7,43.2 297.9,40.2 300.0,37.5 302.1,35.1 304.3,32.9 306.4,31.1 308.6,29.4 310.7,28.1 312.9,26.9 315.0,25.9 317.1,25.2 319.3,24.6 321.4,24.1 323.6,23.8 325.7,23.6 327.9,23.5 330.0,23.5 330.0,161.2 327.9,160.0 325.7,158.6 323.6,157.2 321.4,155.6 319.3,154.0 317.1,152.2 315.0,150.3 312.9,148.4 310.7,146.3 308.6,144.1 306.4,141.9 304.3,139.6 302.1,137.2 300.0,134.8 297.9,132.4 295.7,130.0 293.6,127.6 291.4,125.2 289.3,122.9 287.1,120.8 285.0,118.7 282.9,116.8 280.7,115.0 278.6,113.5 276.4,112.3 274.3,111.3 272.1,110.6 270.0,110.5 267.9,111.0 265.7,112.8 263.6,116.2 261.4,120.6 259.3,125.2 257.1,129.8 255.0,134.3 252.9,138.5 250.7,142.4 248.6,145.9 246.4,149.1 244.3,151.9 242.1,154.2 240.0,156.1 237.9,157.6 235.7,158.6 233.6,159.2 231.4,159.5 229.3,159.7 227.1,160.5 225.0,162.5 222.9,165.2 220.7,168.2 218.6,171.1 216.4,173.8 214.3,176.4 212.1,178.6 210.0,180.5 207.9,182.1 205.7,183.4 203.6,184.2 201.4,184.7 199.3,184.7 197.1,184.4 195.0,183.7 192.9,182.5 190.7,181.0 188.6,179.1 186.4,176.8 184.3,174.2 182.1,171.3 180.0,168.0 177.9,164.4 175.7,160.6 173.6,156.6 171.4,152.3 169.3,147.9 167.1,143.4 165.0,138.8 162.9,134.0 160.7,129.3 158.6,124.6 156.4,119.9 154.3,115.4 152.1,110.9 150.0,106.7 147.9,102.6 145.7,98.8 143.6,95.2 141.4,92.0 139.3,89.2 137.1,86.9 135.0,85.0 132.9,83.8 130.7,83.2 128.6,82.9 126.4,82.8 124.3,82.8 122.1,82.7 120.0,82.6 117.9,82.4 115.7,82.2 113.6,82.1 111.4,82.3 109.3,82.9 107.1,83.8 105.0,85.0 102.9,86.4 100.7,87.8 98.6,89.4 96.4,90.9 94.3,92.3 92.1,93.6 90.0,94.7 87.9,95.7 85.7,96.4 83.6,96.9 81.4,97.2 79.3,97.1 77.1,96.8 75.0,96.2 72.9,95.4 70.7,94.2 68.6,92.8 66.4,91.2 64.3,89.3 62.1,87.3 60.0,85.3 57.9,83.5 55.7,82.8 53.6,84.0 51.4,86.6 49.3,89.7 47.1,93.1 45.0,96.7 42.9,100.4 40.7,104.2 38.6,108.0 36.4,111.8 34.3,115.6 32.1,119.3 30.0,122.9" fill="#0b6e99" opacity=".18"/>
+<polyline points="30.0,98.0 32.1,95.7 34.3,93.5 36.4,91.5 38.6,89.6 40.7,88.0 42.9,86.5 45.0,85.2 47.1,84.0 49.3,83.0 51.4,82.1 53.6,81.4 55.7,80.7 57.9,80.2 60.0,79.8 62.1,79.5 64.3,79.3 66.4,79.1 68.6,79.0 70.7,78.9 72.9,78.8 75.0,78.7 77.1,78.7 79.3,78.6 81.4,78.5 83.6,78.4 85.7,78.3 87.9,78.2 90.0,78.0 92.1,77.8 94.3,77.6 96.4,77.3 98.6,77.1 100.7,76.8 102.9,76.6 105.0,76.3 107.1,76.1 109.3,76.0 111.4,75.8 113.6,75.8 115.7,75.8 117.9,75.9 120.0,76.1 122.1,76.4 124.3,76.8 126.4,77.4 128.6,78.2 130.7,79.1 132.9,80.2 135.0,81.4 137.1,82.9 139.3,84.5 141.4,86.3 143.6,88.3 145.7,90.5 147.9,92.9 150.0,95.4 152.1,98.2 154.3,101.0 156.4,104.0 158.6,107.2 160.7,110.4 162.9,113.7 165.0,117.1 167.1,120.6 169.3,124.0 171.4,127.5 173.6,131.0 175.7,134.4 177.9,137.7 180.0,141.0 182.1,144.1 184.3,147.1 186.4,149.9 188.6,152.5 190.7,155.0 192.9,157.2 195.0,159.2 197.1,160.9 199.3,162.4 201.4,163.6 203.6,164.5 205.7,165.1 207.9,165.4 210.0,165.5 212.1,165.2 214.3,164.7 216.4,163.9 218.6,162.9 220.7,161.5 222.9,160.0 225.0,158.2 227.1,156.2 229.3,154.0 231.4,151.7 233.6,149.2 235.7,146.6 237.9,143.8 240.0,141.0 242.1,138.2 244.3,135.2 246.4,132.3 248.6,129.4 250.7,126.5 252.9,123.6 255.0,120.8 257.1,118.1 259.3,115.5 261.4,112.9 263.6,110.5 265.7,108.2 267.9,106.0 270.0,104.0 272.1,102.1 274.3,100.3 276.4,98.7 278.6,97.2 280.7,95.8 282.9,94.5 285.0,93.4 287.1,92.3 289.3,91.4 291.4,90.5 293.6,89.7 295.7,89.0 297.9,88.3 300.0,87.6 302.1,87.0 304.3,86.4 306.4,85.8 308.6,85.2 310.7,84.5 312.9,83.9 315.0,83.2 317.1,82.5 319.3,81.8 321.4,81.0 323.6,80.2 325.7,79.4 327.9,78.5 330.0,77.6" fill="none" stroke="#888" stroke-width="2" stroke-dasharray="5 4"/>
+<polyline points="30.0,83.5 32.1,82.9 34.3,82.3 36.4,81.8 38.6,81.3 40.7,80.8 42.9,80.4 45.0,80.0 47.1,79.7 49.3,79.4 51.4,79.1 53.6,78.9 55.7,78.8 57.9,78.7 60.0,78.6 62.1,78.5 64.3,78.5 66.4,78.5 68.6,78.6 70.7,78.6 72.9,78.7 75.0,78.8 77.1,78.8 79.3,78.9 81.4,79.0 83.6,79.0 85.7,79.1 87.9,79.1 90.0,79.1 92.1,79.1 94.3,79.1 96.4,79.0 98.6,79.0 100.7,78.9 102.9,78.8 105.0,78.7 107.1,78.6 109.3,78.4 111.4,78.3 113.6,78.3 115.7,78.2 117.9,78.2 120.0,78.2 122.1,78.3 124.3,78.4 126.4,78.7 128.6,79.0 130.7,79.4 132.9,79.9 135.0,80.5 137.1,81.2 139.3,82.0 141.4,83.0 143.6,84.1 145.7,85.4 147.9,86.8 150.0,88.4 152.1,90.1 154.3,91.9 156.4,93.9 158.6,96.0 160.7,98.3 162.9,100.7 165.0,103.2 167.1,105.9 169.3,108.6 171.4,111.4 173.6,114.4 175.7,117.3 177.9,120.3 180.0,123.4 182.1,126.4 184.3,129.4 186.4,132.4 188.6,135.4 190.7,138.2 192.9,141.0 195.0,143.6 197.1,146.1 199.3,148.5 201.4,150.6 203.6,152.5 205.7,154.3 207.9,155.7 210.0,157.0 212.1,157.9 214.3,158.6 216.4,159.0 218.6,159.1 220.7,158.9 222.9,158.4 225.0,157.6 227.1,156.5 229.3,155.2 231.4,153.6 233.6,151.7 235.7,149.6 237.9,147.3 240.0,144.8 242.1,142.1 244.3,139.2 246.4,136.3 248.6,133.3 250.7,130.2 252.9,127.0 255.0,123.9 257.1,120.7 259.3,117.6 261.4,114.6 263.6,111.6 265.7,108.8 267.9,106.1 270.0,103.5 272.1,101.1 274.3,98.8 276.4,96.8 278.6,94.9 280.7,93.2 282.9,91.7 285.0,90.4 287.1,89.3 289.3,88.3 291.4,87.6 293.6,87.0 295.7,86.6 297.9,86.3 300.0,86.2 302.1,86.2 304.3,86.3 306.4,86.5 308.6,86.8 310.7,87.2 312.9,87.6 315.0,88.1 317.1,88.7 319.3,89.3 321.4,89.9 323.6,90.5 325.7,91.1 327.9,91.8 330.0,92.4" fill="none" stroke="#0b6e99" stroke-width="2.5"/>
+<circle cx="55.7" cy="78.7" r="4.5" fill="#e4572e"/><circle cx="111.4" cy="78.4" r="4.5" fill="#e4572e"/><circle cx="132.9" cy="79.8" r="4.5" fill="#e4572e"/><circle cx="227.1" cy="156.8" r="4.5" fill="#e4572e"/><circle cx="265.7" cy="108.7" r="4.5" fill="#e4572e"/>
+<line x1="30" y1="205" x2="330" y2="205" stroke="#66758a"/><text x="180" y="218" font-size="11" text-anchor="middle" fill="#66758a">position along a line</text>
+<text x="34" y="14" font-size="10" fill="#e4572e">● measurements</text><text x="130" y="14" font-size="10" fill="#0b6e99">— GP estimate ± 2σ</text><text x="245" y="14" font-size="10" fill="#888">- - truth</text>
+</svg>
+<p><b>Mapping error (ME).</b> Because we invented the sea floor ourselves, we know the truth, so we can score the map. ME is the typical size of the mistake, the <i>root-mean-square error</i>:</p>
+<p class="eq">ME = √( (1/N) Σ ( ŷ<sub>i</sub> − d<sub>i</sub> )² )</p>
+<p>Take the estimated depth ŷ and true depth <i>d</i> at each of N test points in the water, square the differences (so over- and under-estimates both count), average, and take the square root to get metres back. The “|Error|” button shows these mistakes as a map: bright means a bad guess.</p>
+<p><b>Why ME can wobble.</b> New data usually helps, but the GP’s “average depth” is the average of what has been seen so far. If the first robots sample mostly deep water, the fallback average is too large everywhere else, and ME can briefly rise before it recovers. That is normal, not a bug.</p>
+
+<h3>7 · What to try</h3>
+<ol>
+<li><b>Same robots, different layout.</b> Apply “Line”, then “Cluster”, run each, and use <b>Pin run</b> to overlay the curves. Which gives lower ME for the same number of robots?</li>
+<li><b>Forcing a sweep.</b> Add waypoints that make one robot cross the unexplored basin before heading home. Coverage and ME both improve, at the cost of a longer swim.</li>
+<li><b>Sensor width.</b> Raise the beam angle from 90° to 120°. Coverage rises, but does ME improve as much?</li>
+<li><b>GP length-scale.</b> Set ℓ to 5 m (too small: the map is patchy) and to 60 m (too big: details are smoothed away). The true bathymetry has features around 15–35 m, and the best ME is near that.</li>
+<li><b>Sample rate.</b> Lower it to 0.1 Hz: measurements are 3 m apart instead of 0.3 m. Does the final map get much worse?</li>
+<li><b>Energy.</b> Add robots and watch the quadrotor’s Wh. More robots take more flight time and the quad is heavier on the way out.</li>
+</ol>
+
+<h3>8 · Honest limitations</h3>
+<ul>
+<li>The sea floor is <b>synthetic</b> (smooth bumps plus a tilt), so a GP with the right length-scale does well. Real seabeds are rougher, and ℓ would have to be learned from data.</li>
+<li>Robots do not avoid <i>each other</i>; the current is a simple model; propeller and hull forces are lumped into time constants.</li>
+<li>To keep the browser fast, a new measurement within ℓ/20 of one the GP already holds is skipped. This hardly changes the map, but it means very high sample rates stop helping.</li>
+<li>The quad’s power numbers are plausible for a ~1.5 kg quadrotor but not from a specific vehicle. They are editable.</li>
+</ul>
+</section>
 </main>
 </div>
 
@@ -162,16 +253,21 @@ function pip(poly,x,y){let c=false;for(let i=0,j=poly.length-1;i<poly.length;j=i
   if((a.y>y)!==(b.y>y)&&x<(b.x-a.x)*(y-a.y)/(b.y-a.y)+a.x)c=!c;}return c;}
 function dseg(px,py,a,b){const dx=b.x-a.x,dy=b.y-a.y,l2=dx*dx+dy*dy||1e-12;
   let u=((px-a.x)*dx+(py-a.y)*dy)/l2;u=Math.max(0,Math.min(1,u));return Math.hypot(px-a.x-u*dx,py-a.y-u*dy);}
-function buildGrids(obs,clr){
+const SQUARE=[{x:0,y:0},{x:W,y:0},{x:W,y:W},{x:0,y:W}];
+function polyEdgeDist(poly,x,y){let m=1e9;for(let e=0,f=poly.length-1;e<poly.length;f=e++)m=Math.min(m,dseg(x,y,poly[e],poly[f]));return m;}
+/* water = inside the outer boundary polygon and outside every obstacle; free = water with a safety margin to all edges */
+function buildGrids(obs,clr,boundary){
+  const bnd=(boundary&&boundary.length>=3)?boundary:SQUARE;
   const water=new Uint8Array(G*G),free=new Uint8Array(G*G);
   const bb=obs.map(o=>{let x0=1e9,x1=-1e9,y0=1e9,y1=-1e9;for(const p of o){x0=Math.min(x0,p.x);x1=Math.max(x1,p.x);y0=Math.min(y0,p.y);y1=Math.max(y1,p.y);}return [x0-clr,x1+clr,y0-clr,y1+clr];});
   for(let j=0;j<G;j++)for(let i=0;i<G;i++){
-    const x=i+.5,y=j+.5;let inside=false,dm=1e9;
+    const x=i+.5,y=j+.5;
+    if(!pip(bnd,x,y))continue;
+    let inside=false,dm=1e9;
     for(let k=0;k<obs.length;k++){const b=bb[k];if(x<b[0]||x>b[1]||y<b[2]||y>b[3])continue;const o=obs[k];
-      if(pip(o,x,y))inside=true;
-      for(let e=0,f=o.length-1;e<o.length;f=e++)dm=Math.min(dm,dseg(x,y,o[e],o[f]));}
+      if(pip(o,x,y))inside=true;dm=Math.min(dm,polyEdgeDist(o,x,y));}
     water[j*G+i]=inside?0:1;
-    free[j*G+i]=(!inside&&dm>=clr&&x>=1.5&&x<=W-1.5&&y>=1.5&&y<=W-1.5)?1:0;}
+    free[j*G+i]=(!inside&&dm>=clr&&polyEdgeDist(bnd,x,y)>=clr)?1:0;}
   return {water,free};
 }
 const cellOf=(x,y)=>[Math.max(0,Math.min(G-1,Math.floor(x))),Math.max(0,Math.min(G-1,Math.floor(y)))];
@@ -348,7 +444,9 @@ class GP{
 
 /* ---- full pre-computation (everything except the GP checkpoints) ---- */
 function prepare(P,S){
-  const truth=makeTruth(P.seed),gr=buildGrids(S.obstacles,P.clearance);
+  const truth=makeTruth(P.seed),gr=buildGrids(S.obstacles,P.clearance,S.boundary);
+  S.robots.forEach((r,i)=>{if(!isWater(gr,r.x,r.y))throw new Error('Drop point '+(i+1)+' is on land or inside an obstacle.');});
+  if(!isWater(gr,S.collect.x,S.collect.y))throw new Error('The collection point is on land or inside an obstacle.');
   const stages=S.robots.map(r=>planStages(gr,r,S.collect));
   const quad=quadPlan(P,S.launch,S.robots);
   const robots=stages.map((st,i)=>simRobot(P,st,quad.release[i]+P.qAlt/P.vFall+P.settle,P.seed*101+i*17+3,truth,gr));
@@ -374,7 +472,7 @@ class GPRun{
     this.tk.push(t);this.me.push(Math.sqrt(se/c));this.maps.push(out);this.used.push(this.accepted.length);this.k++;return this.k/this.nck;}
 }
 
-return {W,G,rng,gauss,makeTruth,pip,buildGrids,isWater,nearestFree,plan,planStages,quadPlan,simRobot,stampDisc,coverage,GP,prepare,GPRun,pointAt};
+return {SQUARE,W,G,rng,gauss,makeTruth,pip,buildGrids,isWater,nearestFree,plan,planStages,quadPlan,simRobot,stampDisc,coverage,GP,prepare,GPRun,pointAt};
 })();
 if(typeof module!=='undefined')module.exports=Core;
 </script>
@@ -412,7 +510,8 @@ for(const d of PDEF){if(d[7]!==grp){grp=d[7];const h=document.createElement('div
 function readP(){const P={...FIXED};for(const d of PDEF){let v=parseFloat($('p_'+d[0]).value);if(!isFinite(v))v=d[3];P[d[0]]=Math.max(d[4],Math.min(d[5],v));}return P;}
 
 /* scenario */
-let S={launch:{x:14,y:14},collect:{x:184,y:184},
+const DEF_BOUNDARY=()=>[[10,20],[60,8],[130,14],[188,30],[194,95],[184,150],[190,192],[120,194],[60,186],[12,170],[6,100]].map(a=>({x:a[0],y:a[1]}));
+let S={boundary:DEF_BOUNDARY(),launch:{x:14,y:14},collect:{x:184,y:184},
   robots:[{x:20,y:100,wps:[]},{x:50,y:162,wps:[]},{x:95,y:34,wps:[]},{x:150,y:92,wps:[]}],
   obstacles:[
    [{x:80,y:85},{x:110,y:70},{x:125,y:95},{x:115,y:125},{x:88,y:120}],
@@ -422,17 +521,17 @@ let tool='select',sel=0,draft=[],run=null,gpr=null,tNow=0,playing=false,pins=[],
 let grids=null,stagesPrev=null,dirty=true,truthCache=null,truthSeed=null;
 
 /* tools */
-const TOOLS=[['select','✥ Move / select'],['launch','🛫 Launch pt'],['collect','🎯 Collection pt'],['drop','＋ Drop pt (robot)'],['wp','◆ Waypoint (sel. robot)'],['obs','⬠ Draw obstacle'],['del','✕ Delete']];
+const TOOLS=[['select','✥ Move / select'],['launch','🛫 Launch pt'],['collect','🎯 Collection pt'],['drop','＋ Drop pt (robot)'],['wp','◆ Waypoint (sel. robot)'],['obs','⬠ Draw obstacle'],['bnd','◇ Add shore vertex'],['del','✕ Delete']];
 const tb=$('tools');
 for(const [k,l] of TOOLS){const b=document.createElement('button');b.textContent=l;b.dataset.k=k;b.onclick=()=>setTool(k);tb.appendChild(b);}
 function setTool(k){tool=k;draft=[];for(const b of tb.children)b.classList.toggle('on',b.dataset.k===k);
   $('finishPoly').style.display=k==='obs'?'block':'none';
   const m={select:'Drag any marker or polygon vertex. Click a drop point to select that robot.',launch:'Click to place the quadrotor launch point.',collect:'Click to place the collection point.',
     drop:'Click to add a drop point (one robot per drop point).',wp:'Click to append a waypoint to the selected robot; they are visited in order.',
-    obs:'Click vertices; click the first vertex or “Close polygon” to finish.',del:'Click a drop point, waypoint or obstacle to remove it.'};
+    bnd:'Click near the shoreline to insert a vertex, then drag vertices (Move tool) to reshape the outer boundary.',obs:'Click vertices; click the first vertex or “Close polygon” to finish.',del:'Click a drop point, waypoint, obstacle or shore vertex to remove it.'};
   $('msg').textContent=m[k];redraw();}
 function invalidate(){dirty=true;if(run){run=null;gpr=null;playing=false;$('playBtn').disabled=true;$('resetBtn').disabled=true;$('pinBtn').disabled=true;$('tSlider').disabled=true;$('stat').textContent='Scenario edited — press “Run simulation”.';$('kpi').innerHTML='';}redraw();}
-function replan(){if(!dirty)return;dirty=false;const P=readP();grids=Core.buildGrids(S.obstacles,P.clearance);stagesPrev=S.robots.map(r=>Core.planStages(grids,r,S.collect));}
+function replan(){if(!dirty)return;dirty=false;const P=readP();grids=Core.buildGrids(S.obstacles,P.clearance,S.boundary);stagesPrev=S.robots.map(r=>Core.planStages(grids,r,S.collect));}
 
 /* canvases */
 const cvL=$('cvLive'),cvT=$('cvTruth'),cvE=$('cvEst');const SC=cvL.width/W;
@@ -444,6 +543,7 @@ function hit(p){const tol=7*W/cvL.getBoundingClientRect().width;
   if(Math.hypot(p.x-S.launch.x,p.y-S.launch.y)<tol*1.3)return {kind:'launch'};
   if(Math.hypot(p.x-S.collect.x,p.y-S.collect.y)<tol*1.3)return {kind:'collect'};
   for(let i=0;i<S.obstacles.length;i++)for(let k=0;k<S.obstacles[i].length;k++)if(Math.hypot(p.x-S.obstacles[i][k].x,p.y-S.obstacles[i][k].y)<tol)return {kind:'vtx',i,k};
+  for(let k=0;k<S.boundary.length;k++)if(Math.hypot(p.x-S.boundary[k].x,p.y-S.boundary[k].y)<tol)return {kind:'bvtx',k};
   for(let i=0;i<S.obstacles.length;i++)if(Core.pip(S.obstacles[i],p.x,p.y))return {kind:'poly',i};
   return null;}
 let drag=null;
@@ -453,14 +553,16 @@ cvL.addEventListener('pointerdown',e=>{const p=evW(cvL,e);const h=hit(p);const c
   else if(tool==='collect'){S.collect={x:p.x,y:p.y};invalidate();}
   else if(tool==='drop'){S.robots.push({x:p.x,y:p.y,wps:[]});sel=S.robots.length-1;invalidate();}
   else if(tool==='wp'){if(h&&h.kind==='drop'){sel=h.i;redraw();}else if(sel>=0&&S.robots[sel]){S.robots[sel].wps.push({x:p.x,y:p.y});invalidate();}else $('msg').textContent='Select a robot first (click its drop point).';}
+  else if(tool==='bnd'){let bi=0,bd=1e9;const B=S.boundary;for(let e=0;e<B.length;e++){const a=B[e],b=B[(e+1)%B.length],dx=b.x-a.x,dy=b.y-a.y,l2=dx*dx+dy*dy||1e-9;let u=((p.x-a.x)*dx+(p.y-a.y)*dy)/l2;u=Math.max(0,Math.min(1,u));const d=Math.hypot(p.x-a.x-u*dx,p.y-a.y-u*dy);if(d<bd){bd=d;bi=e;}}B.splice(bi+1,0,{x:p.x,y:p.y});invalidate();}
   else if(tool==='obs'){if(draft.length>=3&&Math.hypot(p.x-draft[0].x,p.y-draft[0].y)<6)finishPoly();else{draft.push({x:p.x,y:p.y});redraw();}}
   else if(tool==='del'){if(!h)return;
     if(h.kind==='drop'){S.robots.splice(h.i,1);sel=Math.min(sel,S.robots.length-1);}else if(h.kind==='wp')S.robots[h.i].wps.splice(h.k,1);
-    else if(h.kind==='poly'||h.kind==='vtx')S.obstacles.splice(h.i,1);invalidate();}});
+    else if(h.kind==='poly'||h.kind==='vtx')S.obstacles.splice(h.i,1);else if(h.kind==='bvtx'&&S.boundary.length>3)S.boundary.splice(h.k,1);invalidate();}});
 cvL.addEventListener('pointermove',e=>{if(!drag)return;const p=evW(cvL,e);const cl=v=>Math.max(1,Math.min(W-1,v));
   if(drag.kind==='drop'){S.robots[drag.i].x=cl(p.x);S.robots[drag.i].y=cl(p.y);}
   else if(drag.kind==='wp'){const w=S.robots[drag.i].wps[drag.k];w.x=cl(p.x);w.y=cl(p.y);}
   else if(drag.kind==='launch'){S.launch={x:cl(p.x),y:cl(p.y)};}else if(drag.kind==='collect'){S.collect={x:cl(p.x),y:cl(p.y)};}
+  else if(drag.kind==='bvtx'){const v=S.boundary[drag.k];v.x=cl(p.x);v.y=cl(p.y);}
   else if(drag.kind==='vtx'){const v=S.obstacles[drag.i][drag.k];v.x=cl(p.x);v.y=cl(p.y);}
   else if(drag.kind==='poly'){const dx=p.x-drag.last.x,dy=p.y-drag.last.y;for(const v of S.obstacles[drag.i]){v.x+=dx;v.y+=dy;}drag.last=p;}
   dirty=true;redraw();});
@@ -476,12 +578,12 @@ $('applyLayout').onclick=()=>{const n=Math.max(1,Math.min(12,parseInt($('layoutN
     else if(kind==='spread'){const c=Math.ceil(Math.sqrt(n));pts.push({x:30+140*((i%c)+.5)/c,y:30+140*(Math.floor(i/c)+.5)/Math.ceil(n/c)});}
     else if(kind==='cluster'){const a=i*2.4,r=4+6*Math.sqrt(i);pts.push({x:35+r*Math.cos(a),y:100+r*Math.sin(a)});}
     else pts.push({x:100+75*Math.cos(2*Math.PI*i/n+.4),y:100+75*Math.sin(2*Math.PI*i/n+.4)});}
-  const g=Core.buildGrids(S.obstacles,3);
+  const g=Core.buildGrids(S.obstacles,3,S.boundary);
   S.robots=pts.map(p=>{const c=Core.nearestFree(g.free,p.x,p.y)||[p.x,p.y];return {x:c[0]+.5,y:c[1]+.5,wps:[]};});sel=0;invalidate();};
 
 /* export / import */
 $('expBtn').onclick=()=>{$('json').value=JSON.stringify({scenario:S,params:Object.fromEntries(PDEF.map(d=>[d[0],parseFloat($('p_'+d[0]).value)]))});};
-$('impBtn').onclick=()=>{try{const o=JSON.parse($('json').value);if(!o.scenario)throw 0;S=o.scenario;
+$('impBtn').onclick=()=>{try{const o=JSON.parse($('json').value);if(!o.scenario)throw 0;S=o.scenario;if(!S.boundary)S.boundary=Core.SQUARE.map(q=>({x:q.x,y:q.y}));
   for(const k in (o.params||{})){const el=$('p_'+k);if(el)el.value=o.params[k];}sel=0;invalidate();$('msg').textContent='Imported.';}catch(e){$('msg').textContent='Could not parse JSON.';}};
 
 /* color maps */
@@ -496,6 +598,9 @@ function getTruth(P){if(truthSeed!==P.seed){truthSeed=P.seed;const t=Core.makeTr
 
 /* drawing helpers */
 function drawObstacles(c){for(const o of S.obstacles){c.beginPath();o.forEach((p,i)=>{const q=w2c(p.x,p.y);i?c.lineTo(q[0],q[1]):c.moveTo(q[0],q[1]);});c.closePath();c.fillStyle='#c9b48a';c.fill();c.strokeStyle='#7a6a45';c.lineWidth=1.5;c.stroke();}}
+function drawLand(c,handles){const B=S.boundary;c.beginPath();c.rect(0,0,cvL.width,cvL.height);B.forEach((p,i)=>{const q=w2c(p.x,p.y);i?c.lineTo(q[0],q[1]):c.moveTo(q[0],q[1]);});c.closePath();
+  c.fillStyle='#c9d8a8';c.fill('evenodd');c.beginPath();B.forEach((p,i)=>{const q=w2c(p.x,p.y);i?c.lineTo(q[0],q[1]):c.moveTo(q[0],q[1]);});c.closePath();c.strokeStyle='#5d7a3a';c.lineWidth=2;c.stroke();
+  if(handles)for(const p of B){const q=w2c(p.x,p.y);c.fillStyle='#fff';c.strokeStyle='#5d7a3a';c.lineWidth=1.5;c.fillRect(q[0]-4,q[1]-4,8,8);c.strokeRect(q[0]-4,q[1]-4,8,8);}}
 function drawMarkers(c,showLabels){
   let q=w2c(S.launch.x,S.launch.y);c.fillStyle='#fff';c.strokeStyle='#0e2a3b';c.lineWidth=2;c.beginPath();c.arc(q[0],q[1],11,0,7);c.fill();c.stroke();c.fillStyle='#0e2a3b';c.font='bold 13px system-ui';c.textAlign='center';c.textBaseline='middle';c.fillText('H',q[0],q[1]+.5);
   q=w2c(S.collect.x,S.collect.y);c.strokeStyle='#d81159';c.lineWidth=2.5;for(const r of [12,6]){c.beginPath();c.arc(q[0],q[1],r,0,7);c.stroke();}
@@ -523,7 +628,7 @@ function drawLive(){const P=readP(),c=cvL.getContext('2d'),T=getTruth(P);
   if(run){const im=covCtx.createImageData(200,200),f=run.cov.first;
     for(let j=0;j<200;j++)for(let i=0;i<200;i++){if(f[j*200+i]<=tNow){const o=((199-j)*200+i)*4;im.data[o]=30;im.data[o+1]=140;im.data[o+2]=170;im.data[o+3]=120;}}
     covCtx.putImageData(im,0,0);c.drawImage(covImg,0,0,cvL.width,cvL.height);}
-  drawObstacles(c);
+  drawLand(c,tool==='select'||tool==='bnd'||tool==='del');drawObstacles(c);
   // planned paths (dashed)
   (run?run.stages:stagesPrev||[]).forEach((st,i)=>{const col=COL[i%COL.length];st.forEach(L=>polyline(c,L.pts,col,1.3,[5,4]));});
   if(!run){// quad tour preview
@@ -544,17 +649,17 @@ function drawLive(){const P=readP(),c=cvL.getContext('2d'),T=getTruth(P);
     for(const [a,b] of [[1,1],[1,-1],[-1,1],[-1,-1]]){c.beginPath();c.moveTo(0,0);c.lineTo(a*9*sc,b*9*sc);c.stroke();c.fillStyle='rgba(14,42,59,.35)';c.beginPath();c.arc(a*9*sc,b*9*sc,5*sc,0,7);c.fill();}
     c.fillStyle='#0e2a3b';c.beginPath();c.arc(0,0,4,0,7);c.fill();c.restore();}
 }
-function drawTruth(){const P=readP(),T=getTruth(P),c=cvT.getContext('2d');c.imageSmoothingEnabled=true;c.drawImage(T.img,0,0,cvT.width,cvT.height);drawObstacles(c);colorbar(c,T.t.dmin,T.t.dmax,VIR,'depth');
+function drawTruth(){const P=readP(),T=getTruth(P),c=cvT.getContext('2d');c.imageSmoothingEnabled=true;c.drawImage(T.img,0,0,cvT.width,cvT.height);drawLand(c,false);drawObstacles(c);colorbar(c,T.t.dmin,T.t.dmax,VIR,'depth');
   if(run){const q=(a)=>a;c.lineWidth=1;run.robots.forEach((rb,i)=>{polyline(c,rb.xs.map((x,k)=>({x,y:rb.ys[k]})).slice(0,Math.max(0,Math.floor((tNow-rb.t0)/.5)+1)),'rgba(255,255,255,.85)',1.3);});}}
 function drawEst(){const P=readP(),T=getTruth(P),c=cvE.getContext('2d');c.setTransform(1,0,0,1,0,0);c.clearRect(0,0,cvE.width,cvE.height);
-  if(!run||!gpr||!gpr.maps.length){c.fillStyle='#e8eef2';c.fillRect(0,0,cvE.width,cvE.height);c.fillStyle='#66758a';c.font='15px system-ui';c.textAlign='center';c.fillText(busy?'Fitting GP…':'Run the simulation to see the GP regression',cvE.width/2,cvE.height/2);drawObstacles(c);return;}
+  if(!run||!gpr||!gpr.maps.length){c.fillStyle='#e8eef2';c.fillRect(0,0,cvE.width,cvE.height);c.fillStyle='#66758a';c.font='15px system-ui';c.textAlign='center';c.fillText(busy?'Fitting GP…':'Run the simulation to see the GP regression',cvE.width/2,cvE.height/2);drawLand(c,false);drawObstacles(c);return;}
   let k=0;while(k+1<gpr.tk.length&&gpr.tk[k+1]<=tNow)k++;
   const m=gpr.maps[k],gx=gpr.gx,im=estCtx.createImageData(gx,gx);
   const emax=Math.max(1,.3*(T.t.dmax-T.t.dmin));
   for(let j=0;j<gx;j++)for(let i=0;i<gx;i++){const v=m[j*gx+i],o=((gx-1-j)*gx+i)*4;let rgb;
     if(view==='est')rgb=lerpStops(VIR,(v-T.t.dmin)/(T.t.dmax-T.t.dmin));else rgb=lerpStops(MAG,Math.abs(v-gpr.truthG[j*gx+i])/emax);
     im.data[o]=rgb[0];im.data[o+1]=rgb[1];im.data[o+2]=rgb[2];im.data[o+3]=255;}
-  estCtx.putImageData(im,0,0);c.imageSmoothingEnabled=true;c.drawImage(estImg,0,0,cvE.width,cvE.height);drawObstacles(c);
+  estCtx.putImageData(im,0,0);c.imageSmoothingEnabled=true;c.drawImage(estImg,0,0,cvE.width,cvE.height);drawLand(c,false);drawObstacles(c);
   c.fillStyle=view==='est'?'rgba(255,255,255,.9)':'rgba(255,255,255,.9)';c.strokeStyle='rgba(0,0,0,.55)';c.lineWidth=.8;
   const used=gpr.used[k];for(let i=0;i<used;i++){const s=gpr.accepted[i],q=w2c(s.x,s.y);c.beginPath();c.arc(q[0],q[1],1.6,0,7);c.fill();}
   if(view==='est')colorbar(c,T.t.dmin,T.t.dmax,VIR,'estimated depth');else colorbar(c,0,emax,MAG,'|error|');
