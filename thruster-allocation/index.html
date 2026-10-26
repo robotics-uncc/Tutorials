@@ -36,6 +36,8 @@ button:hover{border-color:var(--accent)}
 .panels canvas{aspect-ratio:1.1}
 .hd{display:flex;justify-content:space-between;align-items:center;margin-bottom:5px;gap:8px;flex-wrap:wrap}
 .hd b{font-size:13px}
+.pickhint{background:#e8f3fa;border:1px solid #b9d8ea;border-radius:6px;padding:6px 9px;margin:0 0 6px;font-size:12.5px}
+#cv3{cursor:crosshair}
 .leg{display:flex;flex-wrap:wrap;gap:4px 12px;font-size:12px;color:var(--mute);margin-top:4px}
 .leg i{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:4px;vertical-align:-1px}
 table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums;font-size:13px}
@@ -56,7 +58,7 @@ details summary{cursor:pointer;font-weight:600}
 <body>
 <header>
   <h1>Thruster allocation vs. reaction-wheel torque</h1>
-  <p>A cube spacecraft with eight thrusters (layout of Sims &amp; Wolek, Table 3) must deliver a net thrust. Many different thruster burns give the <i>same</i> net force, but each leaves a different torque for the reaction wheels to cancel. Explore them, and see where the current allocation (Sims &amp; Wolek, Eq. 38) sits among them, and what it costs the wheels. Runs entirely in your browser.</p>
+  <p>A cube spacecraft with eight thrusters (layout of Sims &amp; Wolek, Table 3) must deliver a net thrust. Many different thruster burns give the <i>same</i> net force, but each leaves a different torque for the reaction wheels to cancel. Explore them, and see where the Eq. 38 allocation (Sims &amp; Wolek) sits among them, and what it costs the wheels. Runs entirely in your browser.</p>
 </header>
 <div id="gate" style="display:none;position:fixed;inset:0;z-index:99;background:#0e2a3b;color:#fff;align-items:center;justify-content:center;flex-direction:column;gap:10px;font:15px system-ui">
   <div style="font-size:18px;font-weight:600">Thruster allocation tutorial</div>
@@ -82,8 +84,8 @@ details summary{cursor:pointer;font-weight:600}
   <div class="card">
     <h3>1 · Desired net thrust (body frame)</h3>
     <div class="row"><label for="mag">Magnitude</label><input id="mag" type="range" min="0.05" max="2" step="0.01" value="0.6"><span class="v" id="magv"></span></div>
-    <div class="row"><label for="az">Azimuth</label><input id="az" type="range" min="0" max="360" step="1" value="0"><span class="v" id="azv"></span></div>
-    <div class="row"><label for="el">Elevation</label><input id="el" type="range" min="-90" max="90" step="1" value="0"><span class="v" id="elv"></span></div>
+    <div class="row"><label for="az">Azimuth</label><input id="az" type="range" min="0" max="360" step="1" value="45"><span class="v" id="azv"></span></div>
+    <div class="row"><label for="el">Elevation</label><input id="el" type="range" min="-90" max="90" step="1" value="35"><span class="v" id="elv"></span></div>
     <div class="presets" id="presets"></div>
     <p class="note">Magnitude is in units of T<sub>max</sub> (one thruster at full throttle). Azimuth is measured from +x toward +y, elevation from the x–y plane toward +z.</p>
     <div id="feas" class="note"></div>
@@ -92,8 +94,8 @@ details summary{cursor:pointer;font-weight:600}
     <h3>2 · Spacecraft</h3>
     <div class="row"><label for="tmax">T<sub>max</sub> (N)</label><input id="tmax" type="number" value="680" min="0.001" step="any" style="width:80px"></div>
     <div class="row"><label for="isp">I<sub>sp</sub> (s)</label><input id="isp" type="number" value="1960" min="1" step="any" style="width:80px"></div>
-    <div class="row"><label for="shown">Show on craft</label><select id="shown"><option value="cur">Current allocation</option><option value="pk">Picked point</option></select></div>
-    <p class="note">Defaults are the paper’s Table 2 values. Drag either 3-D view to rotate (they rotate together; same body axes). Click a dot in the fuel-vs-torque plot to pick any allocation.</p>
+    <div class="row"><label for="shown">Show on craft</label><select id="shown"><option value="cur">Eq. 38 allocation</option><option value="mf">Min fuel</option><option value="mt">Min wheel torque</option><option value="pk">Picked point</option></select></div>
+    <p class="note">Defaults are the paper’s Table 2 values. Drag either 3-D view to rotate (they rotate together; same body axes). To pick any allocation, click a dot in the <b>Fuel vs. wheel torque</b> plot.</p>
   </div>
 </aside>
 <div id="views">
@@ -106,23 +108,25 @@ details summary{cursor:pointer;font-weight:600}
       <div class="leg" id="leg2"></div></div>
   </div>
   <div class="panels">
-    <div class="card"><div class="hd"><b>Fuel vs. wheel torque (click a dot to pick it)</b></div>
+    <div class="card"><div class="hd"><b>Fuel vs. wheel torque</b><button id="clr">Clear picked point</button></div>
+      <div class="pickhint">👆 <b>Pick an allocation:</b> every grey/black dot below is a different way to produce the same net thrust. <b>Click one</b> and it shows up in blue on all four panels and in the table.</div>
       <canvas id="cv3"></canvas>
-      <div class="leg"><span><i style="background:#1c2733"></i>vertices of the feasible set</span><span><i style="background:#6b7b8c"></i>random combinations of vertices (all give the same net thrust)</span><span>dotted line: no-cancellation limit ΣTᵢ = ‖T‖</span></div></div>
+      <div class="leg"><span><i style="background:#1c2733"></i>vertices of the feasible set</span><span><i style="background:#6b7b8c"></i>random combinations of vertices (all give the same net thrust)</span><span>dotted line: no-cancellation limit ΣTᵢ = ‖T‖</span></div>
+      <div class="leg" id="leg3"></div></div>
     <div class="card"><div class="hd"><b>Throttle of each thruster</b></div>
       <canvas id="cv4"></canvas>
       <div class="leg" id="leg4"></div></div>
   </div>
   <div class="card tw"><h3>Numbers for this thrust demand</h3><table id="tbl"></table>
     <p class="note">“Wasted thrust” = T<sub>max</sub>Σβ − ‖b‖T<sub>max</sub>: thrust that is produced but cancelled against another thruster’s thrust. Wheel torque is the thruster torque with the opposite sign; any pointing torque is ignored here.</p></div>
-  <div class="card"><div class="hd"><b>How much wheel torque does the current allocation need, by thrust direction?</b>
+  <div class="card"><div class="hd"><b>How much wheel torque does the Eq. 38 allocation need, by thrust direction?</b>
     <span><select id="mapm"></select></span></div>
     <canvas id="mapc"></canvas>
     <div id="mapleg" class="note"></div>
     <p class="note">Each pixel is a thrust direction (same magnitude as the slider). Click to jump there. Grey = that force cannot be produced.</p></div>
   <section class="card theory" id="theory">
-<h2>Theory: why the current allocation can cost the wheels more than it needs to</h2>
-<p>This page does <b>not</b> give you a better allocation. It shows you how the current one is chosen, what it ignores, and what the alternatives look like. Finding and formulating the better one is the exercise.</p>
+<h2>Theory: why the Eq. 38 allocation can cost the wheels more than it needs to</h2>
+<p>This page does <b>not</b> give you a better allocation. It shows you how the Eq. 38 one is chosen, what it ignores, and what the alternatives look like. Finding and formulating the better one is the exercise.</p>
 
 <h4>1 · Two linear maps from the same eight numbers</h4>
 <p>Let β<sub>i</sub> = T<sub>i</sub>/T<sub>max</sub> ∈ [0,1] be the throttle of thruster <i>i</i>, which fires along the body-frame unit vector <b>a</b><sub>i</sub> from position <b>r</b><sub>i</sub> (paper, Table 3). Everything the spacecraft feels from the thrusters is linear in β:</p>
@@ -131,18 +135,24 @@ torque   τ = T_max · C β        C = [ r₁×a₁ … r₈×a₈ ]      (3×8)
 fuel flow  ṁ = (T_max / I_sp g) · Σβᵢ</div>
 <p>The trajectory optimizer asks for a net thrust <b>b</b>. Three equations, eight unknowns: for a given <b>b</b> there is a <b>5-dimensional family</b> of throttle vectors, namely the polytope {β : Aβ = b/T<sub>max</sub>, 0 ≤ β ≤ 1}. Every dot in the pictures above is one point of it. Same force, different torque, different fuel. The wheels never see <b>b</b>; they see τ.</p>
 
-<h4>2 · What the current allocation optimizes</h4>
+<h4>2 · What the Eq. 38 allocation optimizes</h4>
 <p>Eq. 38 of the paper picks β by</p>
 <div class="eq">min  ½‖T_max Aβ − T‖² + ½λ‖β‖²      s.t. 0 ≤ β ≤ 1,     λ = 10⁻⁶ T_max²</div>
 <p>When the demanded thrust is producible the first term is driven to zero and the regularizer decides which of the infinitely many exact solutions you get: effectively <b>min ‖β‖²</b> subject to Aβ = b (the λ→0 limit; this page computes exactly that). Look at what is, and is not, in the objective:</p>
 <ul>
 <li><b>The torque Cβ does not appear.</b> The torque is a by-product. Where it lands in the cloud is decided by the layout and by a regularizer that was added to make the answer unique, not to make it good for the wheels.</li>
-<li><b>Fuel is not in it either, not exactly.</b> Fuel is Σβ<sub>i</sub> (an ℓ₁ quantity); the regularizer is Σβ<sub>i</sub>² (ℓ₂). Minimizing ℓ₂ <i>spreads</i> throttle over several thrusters, because splitting a load lowers a sum of squares. When those thrusters have partly opposing components, the spread buys cancellation: ΣT<sub>i</sub> exceeds ‖T‖ by exactly the thrust that cancels. That is the “canceling thrusters” effect from the abstract, and the plot above shows it as a gap between the dotted line and the current dot.</li>
+<li><b>Fuel is not in it either, not exactly.</b> Fuel is Σβ<sub>i</sub> (an ℓ₁ quantity); the regularizer is Σβ<sub>i</sub>² (ℓ₂). Minimizing ℓ₂ <i>spreads</i> throttle over several thrusters, because splitting a load lowers a sum of squares. When those thrusters have partly opposing components, the spread buys cancellation: ΣT<sub>i</sub> exceeds ‖T‖ by exactly the thrust that cancels. That is the “canceling thrusters” effect from the abstract, and the plot above shows it as a gap between the dotted line and the Eq. 38 dot.</li>
 </ul>
-<p>So the current allocation is <i>a</i> feasible point chosen by a criterion that is neither the fuel nor the wheel torque. Unless that criterion happens to coincide with a good trade-off between the two, there are other feasible points that are better on one axis, the other, or both. The plot of fuel against torque shows whether it does: any dot below and to the left of the current marker is an allocation that is better on both counts.</p>
+<p>So the Eq. 38 allocation is <i>a</i> feasible point chosen by a criterion that is neither the fuel nor the wheel torque. Unless that criterion happens to coincide with a good trade-off between the two, there are other feasible points that are better on one axis, the other, or both. The plot of fuel against torque shows whether it does: any dot below and to the left of the Eq. 38 marker is an allocation that is better on both counts.</p>
+
+<h4>2b · The two single-objective optima, for comparison</h4>
+<p>For the same demanded thrust the page also computes, exactly (the feasible set is a polytope, so both are convex problems):</p>
+<div class="eq">min fuel      min  Σβᵢ        s.t.  Aβ = b/T_max,  0 ≤ β ≤ 1     (a linear program)
+min torque    min  ‖Cβ‖²      s.t.  Aβ = b/T_max,  0 ≤ β ≤ 1     (a convex quadratic program)</div>
+<p>Each is optimal for its own objective and says nothing about the other. Where they coincide (some directions) there is no conflict; where they differ, you see the trade-off between fuel and wheel torque that a single allocation cannot avoid. Compare both with Eq. 38 in the table and in the fuel-vs-torque plot: how far is Eq. 38 from each? Ties are broken by a tiny weight on the other objective; where an optimum is not unique this is only one of several equivalent points.</p>
 
 <h4>3 · Why the wheels care</h4>
-<p>With the attitude held on the pointing profile, the wheels must supply −τ for as long as the thrusters fire. Two limits matter: peak torque on each wheel axis (the |τ<sub>1</sub>|, |τ<sub>2</sub>|, |τ<sub>3</sub>| columns, with one wheel per body axis) and accumulated angular momentum ∫τ dt over the burn. The paper assumes ideal wheels with no torque or momentum limit (its Table 2), so a high τ is invisible to the current formulation. A real wheel set would saturate. A trajectory that is fuel-optimal but needs more wheel torque than exists is not flyable.</p>
+<p>With the attitude held on the pointing profile, the wheels must supply −τ for as long as the thrusters fire. Two limits matter: peak torque on each wheel axis (the |τ<sub>1</sub>|, |τ<sub>2</sub>|, |τ<sub>3</sub>| columns, with one wheel per body axis) and accumulated angular momentum ∫τ dt over the burn. The paper assumes ideal wheels with no torque or momentum limit (its Table 2), so a high τ is invisible to the Eq. 38 formulation. A real wheel set would saturate. A trajectory that is fuel-optimal but needs more wheel torque than exists is not flyable.</p>
 
 <h4>4 · What is special about this layout</h4>
 <ul>
@@ -155,18 +165,18 @@ fuel flow  ṁ = (T_max / I_sp g) · Σβᵢ</div>
 <ul>
 <li>It is a single instant: one body-frame thrust vector, no time history. In the real problem <b>b</b>(t) is re-expressed in the body frame as the attitude changes (paper Eq. 35).</li>
 <li>Pointing torque and gyroscopic terms (the other pieces of Eq. 9) are ignored; wheels are unbounded; gravity-gradient is zero as in the paper.</li>
-<li>The dots are the vertices of the feasible polytope (black) plus random convex combinations of 2–4 of them (grey); all give exactly the requested net thrust. They show the <i>shape</i> of the set. They are not an optimizer, and they are not a uniform sample: uniform samples of this polytope are mostly absurd burns in which opposed thrusters fire against each other, so you would see only the far corner of the plot.</li>
+<li>The dots are the vertices of the feasible polytope (black) plus random convex combinations of 2–4 of them (grey); all give exactly the requested net thrust. They show the <i>shape</i> of the set. They are only for display, and they are not a uniform sample: uniform samples of this polytope are mostly absurd burns in which opposed thrusters fire against each other, so you would see only the far corner of the plot.</li>
 <li>Numbers use T<sub>max</sub> = 680 N and I<sub>sp</sub> = 1960 s from the paper’s Table 2. You can change them in the sidebar. Nothing here has been run inside the paper’s trajectory optimizer.</li>
 </ul>
 
 <h4>Exercises</h4>
 <ol>
 <li>Verify the torque column of Table 3 by hand for thrusters 1, 4 and 8, and compare with the sidebar’s torque arrow when you demand exactly +x at 0.5 T<sub>max</sub>.</li>
-<li>Demand +x, magnitude 0.5. Which thrusters does the current allocation fire? Which components of their forces cancel? Use the “wasted thrust” column to confirm.</li>
-<li>Click dots in the fuel-vs-torque plot that sit left of or below the current dot. In the throttle bars, how do their patterns differ from the current one? In torque space, where are they relative to the origin?</li>
-<li>Use the direction map. Are there directions where the current allocation is already among the lowest-torque ones? Where is it worst? Is there any thrust direction that can be produced with essentially zero wheel torque, and why?</li>
+<li>Demand +x, magnitude 0.5. Which thrusters does the Eq. 38 allocation fire, and which does the min-fuel allocation fire? Which force components cancel in the former? Use the “wasted thrust” column to confirm.</li>
+<li>Click dots in the fuel-vs-torque plot that sit left of or below the Eq. 38 dot. In the throttle bars, how do their patterns differ from the Eq. 38 one? In torque space, where are they relative to the origin?</li>
+<li>Use the direction map. Are there directions where the Eq. 38 allocation is already among the lowest-torque ones? Where is it worst? Is there any thrust direction that can be produced with essentially zero wheel torque, and why?</li>
 <li>Raise the magnitude toward the edge of what is producible. What happens to the cloud, and what does that tell you about the freedom you have in allocation near saturation?</li>
-<li><b>Open problem (not provided here).</b> Write down an allocation problem that keeps <b>b</b> as a constraint and has both fuel and wheel torque in the objective, with a weight you can sweep. Decide which norm to use for each term and why. Solve it in Python (e.g. SciPy or CVXPY), reproduce this page’s dots for a given <b>b</b>, and place your solutions on the fuel-vs-torque plot. Then ask what changes once the burn is a trajectory and not one instant.</li>
+<li><b>Open problem (not provided here).</b> The two optima above are the endpoints. Write down an allocation problem that keeps <b>b</b> as a constraint and has both fuel and wheel torque in the objective, with a weight you can sweep (or one objective as a constraint on the other). Decide which norm to use for each term and why. Solve it in Python (e.g. SciPy or CVXPY), reproduce this page’s numbers for a given <b>b</b>, and place your solutions on the fuel-vs-torque plot between the endpoints. Then ask what changes once the burn is a trajectory and not one instant.</li>
 </ol>
 <p class="note">Source: Sims &amp; Wolek, <i>Optimal Spacecraft Trajectory Design with Coupled Thruster and Reaction-Wheel Allocation</i> (draft), Sec. III and Sec. IV.A, Table 3, Eqs. 10, 35–38.</p>
 
@@ -239,6 +249,10 @@ function solve(V,{wFuel=0,wTorque=0,wNorm=0,iters=400}){
  return x.map(z=>Math.min(1,Math.max(0,z)));}
 /* The CURRENT allocation (Sims & Wolek Eq. 38 with lambda->0): the feasible beta of smallest |beta|^2. */
 function currentAllocation(V){return solve(V,{wNorm:1});}
+/* The two single-objective optima, for comparison. Each is exact for its own objective over the feasible polytope;
+   a tiny secondary term only breaks ties. */
+function minFuelAllocation(V){return solve(V,{wFuel:1,wTorque:1e-5});}       // LP: min sum(beta)
+function minTorqueAllocation(V){return solve(V,{wTorque:1,wNorm:1e-7});}     // convex QP: min |C beta|^2
 function rng(seed){let s=seed>>>0;return()=>{s=(s+0x6D2B79F5)>>>0;let t=s;t=Math.imul(t^t>>>15,t|1);t^=t+Math.imul(t^t>>>7,t|61);return((t^t>>>14)>>>0)/4294967296;};}
 /* Feasible allocations to display: every vertex of the feasible polytope, plus random convex combinations of 2-4 vertices.
    (Any convex combination of feasible points is feasible.) Display only: not an optimizer, not a uniform sample. Uniform
@@ -248,15 +262,17 @@ function sample(V,n,seed=1){const r=rng(seed),out=V.map(v=>v.slice());
   for(let j=0;j<m;j++){id.push(Math.floor(r()*V.length));const e=-Math.log(r()+1e-12);w.push(e);sum+=e;}
   const x=new Array(N).fill(0);id.forEach((q,j)=>V[q].forEach((z,i)=>x[i]+=w[j]/sum*z));out.push(x);}
  out.nV=V.length;return out;}
-if(typeof module!=="undefined")module.exports={THR,A,C,vertices,currentAllocation,sample,fuel,torque,tnorm,N};
+if(typeof module!=="undefined")module.exports={THR,A,C,vertices,currentAllocation,minFuelAllocation,minTorqueAllocation,sample,fuel,torque,tnorm,N};
 
 return module.exports;})();
 </script>
 <script>
 const E_THR=E_A.THR;
 const $=id=>document.getElementById(id), G0=9.80665;
-const CUR="#D55E00", PK="#0072B2", INK="#1c2733", MUTE="#66758a";
-const st={yaw:-0.75,pitch:0.42,picked:null,V:[],cur:null,S:[],b:[0,0,0],ok:false};
+const CUR="#D55E00", PK="#0072B2", MF="#009E73", MT="#CC79A7", INK="#1c2733", MUTE="#66758a";
+const st={yaw:-0.75,pitch:0.42,picked:null,V:[],cur:null,mf:null,mt:null,S:[],b:[0,0,0],ok:false};
+const NAMES={cur:'Eq. 38 allocation',mf:'Min fuel',mt:'Min wheel torque',pk:'Picked'},COLS={cur:CUR,mf:MF,mt:MT,pk:PK};
+const list=()=>['cur','mf','mt','pk'].filter(k=>st[k==='pk'?'picked':k]).map(k=>({k,name:NAMES[k],col:COLS[k],x:k==='pk'?st.picked:st[k]}));
 const rad=d=>d*Math.PI/180;
 const P=()=>({tmax:+$("tmax").value||680,isp:+$("isp").value||1960});
 function demand(){const m=+$("mag").value,a=rad(+$("az").value),e=rad(+$("el").value);
@@ -276,7 +292,7 @@ function dot(c,p,r,fill,stroke){c.beginPath();c.arc(p[0],p[1],r,0,7);c.fillStyle
 function text(c,s,x,y,col,al){c.fillStyle=col||INK;c.textAlign=al||"left";c.fillText(s,x,y);}
 function ramp(t){t=Math.min(1,Math.max(0,t));const a=[205,216,228],b=[40,70,100];return`rgb(${a.map((z,i)=>Math.round(z+(b[i]-z)*t)).join(",")})`;}
 function nice(max,n){const raw=max/n,p=Math.pow(10,Math.floor(Math.log10(raw))),f=raw/p,s=f<1.5?1:f<3?2:f<7?5:10;return s*p;}
-function allocOf(k){return k==="pk"?st.picked:st.cur;}
+function allocOf(k){return k==="pk"?st.picked:st[k];}
 function shownKey(){const k=$("shown").value;return(k==="pk"&&!st.picked)?"cur":k;}
 /* ---------- view 1: spacecraft ---------- */
 function drawCraft(){const f=fit($("cv1"));if(!f)return;const{c,w,h}=f,s=Math.min(w,h)*.27,cx=w/2,cy=h/2+4;
@@ -287,7 +303,7 @@ function drawCraft(){const f=fit($("cv1"));if(!f)return;const{c,w,h}=f,s=Math.mi
   // body axes triad
   [["x",[1,0,0]],["y",[0,1,0]],["z",[0,0,1]]].forEach(([n,v])=>{const o=[46,h-40],r=rot(v);const q=[o[0]+30*r[0],o[1]-30*r[1]];arrow(c,o,q,MUTE,1.5);text(c,n,q[0]+4,q[1]+4,MUTE);});
   if(!st.ok){text(c,"This net thrust cannot be produced.",w/2,h/2,"#b00020","center");return;}
-  const k=shownKey(),x=allocOf(k)||st.cur,col=k==="pk"?PK:CUR,Lt=0.9;
+  const k=shownKey(),x=allocOf(k)||st.cur,col=COLS[k],Lt=0.9;
   E_THR.forEach((t,i)=>{const p=T(t.r),beta=x[i],q=T([t.r[0]+t.a[0]*Math.max(beta,0.03)*Lt,t.r[1]+t.a[1]*Math.max(beta,0.03)*Lt,t.r[2]+t.a[2]*Math.max(beta,0.03)*Lt]);
     arrow(c,p,q,beta>0.005?"#555":"#c7ced6",beta>0.005?2.5:1.2);dot(c,p,3.5,"#fff","#555");
     const lab=T([t.r[0]*1.18,t.r[1]*1.18,t.r[2]*1.18]);text(c,String(i+1),lab[0]-3,lab[1]+4,INK);});
@@ -302,15 +318,14 @@ function drawTorque(){const f=fit($("cv2"));if(!f)return;const{c,w,h}=f;if(!st.o
   [["τx",[1,0,0]],["τy",[0,1,0]],["τz",[0,0,1]]].forEach(([n,v])=>{line(c,T(v.map(z=>-z*R)),T(v.map(z=>z*R)),"#c7ced6",1);const q=T(v.map(z=>z*R));text(c,n,q[0]+4,q[1]+4,MUTE);});
   const fu=st.S.map(E_A.fuel),f0=Math.min(...fu),f1=Math.max(...fu),idx=tq.map((t,i)=>i).sort((i,j)=>T(tq[j])[2]-T(tq[i])[2]);
   idx.forEach(i=>{const p=T(tq[i]);c.globalAlpha=.6;dot(c,p,2.2,ramp((fu[i]-f0)/(f1-f0+1e-9)));});c.globalAlpha=1;
-  const o=T([0,0,0]);line(c,[o[0]-6,o[1]],[o[0]+6,o[1]],INK,1.5);line(c,[o[0],o[1]-6],[o[0],o[1]+6],INK,1.5);text(c,"0 = no wheel torque",o[0]-10,o[1]-12,INK,"right");
-  const pc=T(E_A.torque(st.cur));line(c,o,pc,CUR,1,[3,3]);dot(c,pc,7,CUR,"#fff");
-  if(st.picked){const pp=T(E_A.torque(st.picked));line(c,o,pp,PK,1,[3,3]);dot(c,pp,7,PK,"#fff");}
+  const o=T([0,0,0]);line(c,[o[0]-6,o[1]],[o[0]+6,o[1]],INK,1.5);line(c,[o[0],o[1]-6],[o[0],o[1]+6],INK,1.5);text(c,"0 = no wheel torque",o[0]+10,o[1]-12,INK);
+  list().forEach(({x,col})=>{const p=T(E_A.torque(x));line(c,o,p,col,1,[3,3]);dot(c,p,7,col,"#fff");});
   text(c,"axes: thruster torque about b1, b2, b3  (units of N·m)",8,h-8,MUTE);
   const sc=nice(R,4);text(c,`grid span ±${(R*P().tmax).toFixed(0)} N·m`,w-8,h-8,MUTE,"right");}
 /* ---------- view 3: fuel vs torque ---------- */
-let plot3=null;
+let plot3=null,hov=null;
 function drawTrade(){const f=fit($("cv3"));if(!f)return;const{c,w,h}=f;if(!st.ok){text(c,"No feasible burns.",w/2,h/2,"#b00020","center");plot3=null;return;}
-  const{tmax}=P(),bn=Math.hypot(...st.b);const all=[...st.S,st.cur,...(st.picked?[st.picked]:[])];
+  const{tmax}=P(),bn=Math.hypot(...st.b);const all=[...st.S,...list().map(z=>z.x)];
   const X=x=>E_A.fuel(x)*tmax,Y=x=>E_A.tnorm(x)*tmax;
   const x0=bn*tmax*.97,x1=Math.max(...all.map(X))*1.03,y1=Math.max(...all.map(Y))*1.08;
   const L=52,Rm=12,Tp=10,B=38,pw=w-L-Rm,ph=h-Tp-B,px=v=>L+(v-x0)/(x1-x0)*pw,py=v=>Tp+ph-v/y1*ph;
@@ -323,44 +338,48 @@ function drawTrade(){const f=fit($("cv3"));if(!f)return;const{c,w,h}=f;if(!st.ok
   c.save();c.translate(13,Tp+ph/2);c.rotate(-Math.PI/2);text(c,"wheel torque ‖τ‖ (N·m)",0,0,INK,"center");c.restore();
   line(c,[px(bn*tmax),Tp],[px(bn*tmax),Tp+ph],MUTE,1.2,[2,4]);text(c,"‖T‖ (no cancellation)",px(bn*tmax)+4,Tp+12,MUTE);
   c.globalAlpha=.35;st.S.forEach((x,i)=>{if(i>=st.S.nV)dot(c,[px(X(x)),py(Y(x))],2.3,"#6b7b8c");});c.globalAlpha=1;st.S.forEach((x,i)=>{if(i<st.S.nV)dot(c,[px(X(x)),py(Y(x))],3.2,"#1c2733");});
-  const m=(x,col,lab)=>{const p=[px(X(x)),py(Y(x))];dot(c,p,7,col,"#fff");text(c,lab,p[0]+10,p[1]+4,col);};
-  m(st.cur,CUR,"current");if(st.picked)m(st.picked,PK,"picked");
-  plot3={px,py,X,Y};}
+  const m=(x,col)=>{const p=[px(X(x)),py(Y(x))];dot(c,p,7,col,"#fff");};
+  list().forEach(({x,col})=>m(x,col));
+  $("leg3").innerHTML=list().map(z=>`<span><i style="background:${z.col}"></i>${z.name}</span>`).join("");
+  plot3={px,py,X,Y};
+  if(hov){const p=[px(X(hov)),py(Y(hov))];c.beginPath();c.arc(p[0],p[1],9,0,7);c.strokeStyle=PK;c.lineWidth=2;c.stroke();}
+  if(!st.picked)text(c,"▲ click any dot to pick it",L+pw-4,Tp+ph-8,PK,"right");}
 /* ---------- view 4: throttles ---------- */
 function drawBars(){const f=fit($("cv4"));if(!f)return;const{c,w,h}=f;if(!st.ok){text(c,"No feasible burns.",w/2,h/2,"#b00020","center");return;}
   const L=40,Rm=10,Tp=10,B=30,pw=w-L-Rm,ph=h-Tp-B,py=v=>Tp+ph-v*ph;
   [0,.5,1].forEach(v=>{line(c,[L,py(v)],[L+pw,py(v)],"#e6ebf0",1);text(c,v.toFixed(1),L-6,py(v)+4,MUTE,"right");});
-  const gw=pw/8,bw=Math.min(22,gw*(st.picked?.38:.6));
+  const A4=list(),gw=pw/8,bw=Math.min(20,gw*.82/A4.length);
   for(let i=0;i<8;i++){const gx=L+gw*(i+.5);
-    const draw=(x,col,off)=>{const v=x[i];c.fillStyle=col;c.fillRect(gx+off,py(v),bw,Math.max(1,py(0)-py(v)));if(v>0.005)text(c,v.toFixed(2),gx+off+bw/2,py(v)-3,MUTE,"center");};
-    if(st.picked){draw(st.cur,CUR,-bw-1);draw(st.picked,PK,1);}else draw(st.cur,CUR,-bw/2);
+    A4.forEach(({x,col},j)=>{const v=x[i],off=(j-A4.length/2)*bw;c.fillStyle=col;c.fillRect(gx+off,py(v),bw-1,Math.max(1,py(0)-py(v)));if(v>0.005)text(c,v.toFixed(2),gx+off+bw/2,py(v)-3,MUTE,"center");});
     text(c,String(i+1),gx,h-12,INK,"center");}
   line(c,[L,py(0)],[L+pw,py(0)],MUTE,1.2);text(c,"thruster",L+pw/2,h-1,MUTE,"center");
   c.save();c.translate(11,Tp+ph/2);c.rotate(-Math.PI/2);text(c,"throttle βᵢ = Tᵢ/Tmax",0,0,INK,"center");c.restore();
-  $("leg4").innerHTML=`<span><i style="background:${CUR}"></i>current allocation</span>`+(st.picked?`<span><i style="background:${PK}"></i>picked</span>`:"");}
+  $("leg4").innerHTML=list().map(z=>`<span><i style="background:${z.col}"></i>${z.name}</span>`).join("");$("leg2").innerHTML=$("leg4").innerHTML;}
 /* ---------- table ---------- */
 function row(name,x,col){const{tmax,isp}=P(),bn=Math.hypot(...st.b),F=E_A.fuel(x),t=E_A.torque(x).map(z=>Math.abs(z*tmax));
   const wasted=(F-bn)*tmax,fl=F*tmax/(isp*G0)*1000;
   return`<tr><td>${col?`<i style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${col};margin-right:6px"></i>`:""}${name}</td><td>${F.toFixed(3)}</td><td>${(F*tmax).toFixed(1)}</td><td>${wasted.toFixed(1)} (${(100*wasted/(bn*tmax)).toFixed(0)}%)</td><td>${fl.toFixed(2)}</td><td><b>${(E_A.tnorm(x)*tmax).toFixed(1)}</b></td><td>${t[0].toFixed(1)}</td><td>${t[1].toFixed(1)}</td><td>${t[2].toFixed(1)}</td></tr>`;}
 function drawTable(){const tb=$("tbl");if(!st.ok){tb.innerHTML="";return;}
-  const mean=new Array(8).fill(0);st.S.forEach(x=>x.forEach((z,i)=>mean[i]+=z/st.S.length));
-  const Tc=E_A.tnorm(st.cur),Fc=E_A.fuel(st.cur),dom=st.S.filter(x=>E_A.tnorm(x)<Tc-1e-9&&E_A.fuel(x)<=Fc+1e-9).length;
+  const Fc=E_A.fuel(st.cur),Tc=E_A.tnorm(st.cur),Fm=E_A.fuel(st.mf),Tm=E_A.tnorm(st.mt),sp=(a,b)=>{const q=b>1e-9?100*(a-b)/b:0;return(q>=0?"+":"−")+Math.abs(q).toFixed(0)+"%";};
   tb.innerHTML=`<tr><th>allocation</th><th>Σβ</th><th>ΣTᵢ (N)</th><th>wasted thrust</th><th>propellant (g/s)</th><th>‖τ‖ (N·m)</th><th>|τ₁|</th><th>|τ₂|</th><th>|τ₃|</th></tr>`
-   +row("Current (Eq. 38)",st.cur,CUR)+(st.picked?row("Picked",st.picked,PK):"")+""
-   +`<tr><td colspan="9" style="text-align:left;white-space:normal;border:0;padding-top:8px">In the fuel-vs-torque plot, <b>${dom}</b> of the ${st.S.length} dots lie strictly below <i>and</i> to the left of (or level with) the current marker: allocations that give the same net thrust with no more thrust-sum and less wheel torque. The count depends on how the dots are generated; it illustrates, it does not measure.</td></tr>`;}
+   +list().map(z=>row(z.name,z.x,z.col)).join("")
+   +`<tr><td colspan="9" style="text-align:left;white-space:normal;border:0;padding-top:8px">For this demand, Eq. 38 uses <b>${sp(Fc,Fm)}</b> propellant relative to the minimum-fuel allocation and needs <b>${sp(Tc,Tm)}</b> wheel torque relative to the minimum-torque allocation. The minimum-fuel allocation’s torque is ${sp(E_A.tnorm(st.mf),Tc)} relative to Eq. 38; the minimum-torque allocation’s propellant is ${sp(E_A.fuel(st.mt),Fc)} relative to Eq. 38. These are two different allocations: each is optimal for one objective only.</td></tr>`;}
 /* ---------- direction map ---------- */
 const MW=72,MH=36;let map=null,mapKey="",mapTimer=0;
-const MET={cur:{n:"Wheel torque of the current allocation (N·m)",f:c=>c.t*P().tmax},
- waste:{n:"Thrust wasted by cancellation in the current allocation (% of demand)",f:c=>c.w}};
+const MET={cur:{n:"Wheel torque of the Eq. 38 allocation (N·m)",f:c=>c.t*P().tmax},
+ mt:{n:"Lowest achievable wheel torque (N·m)",f:c=>c.tm*P().tmax},
+ gap:{n:"Extra wheel torque of Eq. 38 over the lowest achievable (%)",f:c=>c.gap},
+ waste:{n:"Thrust wasted by cancellation in the Eq. 38 allocation (% of demand)",f:c=>c.w},
+ exf:{n:"Extra propellant of Eq. 38 over the minimum-fuel allocation (%)",f:c=>c.exf}};
 Object.keys(MET).forEach(k=>$("mapm").add(new Option(MET[k].n,k)));
 function buildMap(){const mag=+$("mag").value,key=mag+"|"+P().tmax;if(key===mapKey&&map&&map.done)return;mapKey=key;
   const m={cells:new Array(MW*MH),next:0,done:false};map=m;$("mapleg").textContent="computing…";
-  (function step(){if(map!==m)return;const end=Math.min(MW*MH,m.next+500);
+  (function step(){if(map!==m)return;const end=Math.min(MW*MH,m.next+250);
    for(;m.next<end;m.next++){const i=m.next%MW,j=Math.floor(m.next/MW),a=rad((i+.5)*360/MW),e=rad(90-(j+.5)*180/MH),
      b=[mag*Math.cos(e)*Math.cos(a),mag*Math.cos(e)*Math.sin(a),mag*Math.sin(e)],V=E_A.vertices(b);
     if(!V.length){m.cells[m.next]=null;continue;}
-    const x=E_A.currentAllocation(V),t=E_A.tnorm(x);
-    m.cells[m.next]={t,w:100*(E_A.fuel(x)-mag)/mag};}
+    const x=E_A.currentAllocation(V),t=E_A.tnorm(x),tm=E_A.tnorm(E_A.minTorqueAllocation(V)),fm=E_A.fuel(E_A.minFuelAllocation(V));
+    m.cells[m.next]={t,tm,gap:tm>1e-6*mag?100*(t-tm)/tm:0,w:100*(E_A.fuel(x)-mag)/mag,exf:100*(E_A.fuel(x)-fm)/fm};}
    if(m.next<MW*MH){drawMap();setTimeout(step,0);}else{m.done=true;drawMap();}})();}
 function drawMap(){const f=fit($("mapc"));if(!f||!map)return;const{c,w,h}=f,met=MET[$("mapm").value];
   const vals=map.cells.map(z=>z?met.f(z):null),fin=vals.filter(v=>v!==null),lo=fin.length?Math.min(...fin):0,hi=fin.length?Math.max(...fin):1,cw=w/MW,ch=h/MH;
@@ -372,9 +391,9 @@ function drawMap(){const f=fit($("mapc"));if(!f||!map)return;const{c,w,h}=f,met=
 function redrawAll(){drawCraft();drawTorque();drawTrade();drawBars();drawTable();drawMap();}
 function recompute(){st.b=demand();st.V=E_A.vertices(st.b);st.ok=st.V.length>0;st.picked=null;
   const{tmax}=P(),m=+$("mag").value;$("magv").textContent=(m*tmax).toFixed(0)+" N";$("azv").textContent=$("az").value+"°";$("elv").textContent=$("el").value+"°";
-  if(st.ok){st.cur=E_A.currentAllocation(st.V);st.S=E_A.sample(st.V,1500,11);
+  if(st.ok){st.cur=E_A.currentAllocation(st.V);st.mf=E_A.minFuelAllocation(st.V);st.mt=E_A.minTorqueAllocation(st.V);st.S=E_A.sample(st.V,1500,11);
     $("feas").innerHTML=`✓ producible. The set of burns that give exactly this thrust is a 5-D polytope with ${st.V.length} vertices; the dots are its ${st.V.length} vertices plus ${st.S.length-st.V.length} random combinations of them.`;}
-  else{st.cur=null;st.S=[];$("feas").innerHTML=`<span class="bad">✗ Not producible:</span> no throttle setting 0 ≤ βᵢ ≤ 1 gives this net thrust. Reduce the magnitude or change direction.`;}
+  else{st.cur=st.mf=st.mt=null;st.S=[];$("feas").innerHTML=`<span class="bad">✗ Not producible:</span> no throttle setting 0 ≤ βᵢ ≤ 1 gives this net thrust. Reduce the magnitude or change direction.`;}
   clearTimeout(mapTimer);mapTimer=setTimeout(buildMap,150);redrawAll();}
 let pending=false;const sched=()=>{if(!pending){pending=true;requestAnimationFrame(()=>{pending=false;recompute();});}};
 ["mag","az","el"].forEach(i=>$(i).addEventListener("input",sched));["tmax","isp"].forEach(i=>$(i).addEventListener("change",sched));
@@ -385,9 +404,12 @@ $("rst").onclick=()=>{st.yaw=-0.75;st.pitch=0.42;redrawAll();};
 [$("cv1"),$("cv2")].forEach(cv=>{let d=null;cv.onpointerdown=e=>{d=[e.clientX,e.clientY];cv.setPointerCapture(e.pointerId);};
   cv.onpointermove=e=>{if(!d)return;st.yaw+=(e.clientX-d[0])*.01;st.pitch=Math.max(-1.5,Math.min(1.5,st.pitch+(e.clientY-d[1])*.01));d=[e.clientX,e.clientY];drawCraft();drawTorque();};
   cv.onpointerup=()=>{d=null;};});
-$("cv3").onclick=e=>{if(!plot3||!st.ok)return;const r=$("cv3").getBoundingClientRect(),x=e.clientX-r.left,y=e.clientY-r.top;let best=null,bd=1e9;
-  st.S.forEach(s=>{const d=Math.hypot(plot3.px(plot3.X(s))-x,plot3.py(plot3.Y(s))-y);if(d<bd){bd=d;best=s;}});
-  if(best&&bd<24){st.picked=best;$("shown").value="pk";redrawAll();}};
+function nearest(e){const r=$("cv3").getBoundingClientRect(),x=e.clientX-r.left,y=e.clientY-r.top;let best=null,bd=1e9;
+  st.S.forEach(s=>{const d=Math.hypot(plot3.px(plot3.X(s))-x,plot3.py(plot3.Y(s))-y);if(d<bd){bd=d;best=s;}});return bd<24?best:null;}
+$("cv3").onmousemove=e=>{if(!plot3||!st.ok)return;const n=nearest(e);if(n!==hov){hov=n;$("cv3").style.cursor=n?"pointer":"crosshair";drawTrade();}};
+$("cv3").onmouseleave=()=>{hov=null;drawTrade();};
+$("clr").onclick=()=>{st.picked=null;if($("shown").value==="pk")$("shown").value="cur";redrawAll();};
+$("cv3").onclick=e=>{if(!plot3||!st.ok)return;const best=nearest(e);if(best){st.picked=best;$("shown").value="pk";redrawAll();}};
 $("mapc").onclick=e=>{const r=$("mapc").getBoundingClientRect();$("az").value=Math.round((e.clientX-r.left)/r.width*360);$("el").value=Math.round(90-(e.clientY-r.top)/r.height*180);recompute();};
 window.addEventListener("resize",redrawAll);
 recompute();
