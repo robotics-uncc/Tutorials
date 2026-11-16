@@ -1,0 +1,584 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hohmann, finite burn and thruster allocation: debugging reference</title>
+<style>
+:root{--bg:#f4f6f8;--card:#fff;--ink:#1c2733;--mute:#66758a;--line:#d9dfe6;--accent:#0b6e99;--c1:#0072B2;--c2:#D55E00;--c3:#009E73;--c4:#CC79A7}
+*{box-sizing:border-box}
+body{margin:0;font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--ink)}
+header{padding:12px 18px;background:#0e2a3b;color:#fff}
+header h1{margin:0;font-size:18px;font-weight:600}
+header p{margin:2px 0 0;color:#a9c3d3;font-size:12.5px;max-width:1100px}
+.badge{display:inline-block;background:#e4572e;color:#fff;border-radius:4px;padding:1px 7px;font-size:11.5px;font-weight:700;letter-spacing:.06em;margin-right:8px;vertical-align:2px}
+#app{display:grid;grid-template-columns:310px 1fr;gap:14px;padding:14px;align-items:start}
+@media(max-width:980px){#app{grid-template-columns:1fr}}
+.locked #app{display:none}
+.card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:10px 12px}
+.card h3{margin:0 0 6px;font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--mute)}
+#side{display:flex;flex-direction:column;gap:10px;position:sticky;top:8px;max-height:calc(100vh - 16px);overflow:auto}
+@media(max-width:980px){#side{position:static;max-height:none}}
+button,select,input{font:inherit}
+button,select,input[type=number]{border:1px solid var(--line);background:#fff;border-radius:6px;padding:4px 8px;color:var(--ink)}
+button{cursor:pointer}button:hover{border-color:var(--accent)}
+button.go{background:var(--accent);color:#fff;border-color:var(--accent);font-weight:600}
+.row{display:flex;gap:6px;align-items:center;margin:5px 0}
+.row label{width:96px;flex:none}
+.row input[type=range]{flex:1;min-width:0}
+.row .v{width:74px;text-align:right;color:var(--mute);font-variant-numeric:tabular-nums;font-size:12.5px}
+.row input[type=number]{width:84px}
+.presets{display:flex;flex-wrap:wrap;gap:4px;margin-top:4px}.presets button{padding:2px 7px;font-size:12px}
+.note{color:var(--mute);font-size:12px;margin:4px 0 0}
+.ok{color:#0a7a3f;font-weight:700}.bad{color:#b00020;font-weight:700}.warn{color:#9a6a00;font-weight:700}
+#views{display:flex;flex-direction:column;gap:12px;min-width:0}
+.panels{display:grid;grid-template-columns:repeat(auto-fit,minmax(360px,1fr));gap:12px}
+canvas{width:100%;display:block;border-radius:4px;background:#fafbfc;touch-action:none}
+.hd{display:flex;justify-content:space-between;align-items:center;margin-bottom:5px;gap:8px;flex-wrap:wrap}.hd b{font-size:13px}
+.leg{display:flex;flex-wrap:wrap;gap:4px 12px;font-size:12px;color:var(--mute);margin-top:4px}
+.leg i{display:inline-block;width:18px;height:3px;margin-right:4px;vertical-align:3px}
+table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums;font-size:13px}
+th,td{padding:4px 8px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap}
+th:first-child,td:first-child{text-align:left}th{font-size:11.5px;color:var(--mute);font-weight:600}
+.tw{overflow-x:auto}
+tr.sub td{background:#f3f8fb}tr.alloc td:first-child{padding-left:22px}tr.paper td{color:#555;background:#fbfaf3}
+.theory h2{font-size:17px;margin:4px 0 8px}.theory h4{margin:14px 0 4px;font-size:14px}
+.theory p,.theory li{max-width:960px}
+.theory .eq{background:#f0f4f8;border-left:3px solid var(--accent);padding:6px 10px;margin:6px 0;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;overflow-x:auto;white-space:pre}
+.callout{background:#fff6e5;border:1px solid #f0d9a8;border-radius:6px;padding:8px 10px;margin:8px 0;max-width:960px}
+.dbg{background:#fdecea;border:1px solid #f1b5ae;border-radius:6px;padding:8px 10px;margin:0;font-size:13px}
+details summary{cursor:pointer;font-weight:600}
+.chk{display:grid;grid-template-columns:1fr 1fr;gap:4px 18px}.chk div{font-size:12.5px;padding:2px 0;border-bottom:1px dotted var(--line)}
+.tabs{display:flex;gap:4px}.tabs button.on{background:var(--accent);color:#fff;border-color:var(--accent)}
+</style>
+</head>
+<body>
+<header>
+  <h1><span class="badge">DEBUGGING AID</span>Hohmann transfer, finite burn and thruster allocation</h1>
+  <p>An independent reference implementation of the sequential pipeline in Sims &amp; Wolek (Lambert, finite burn, pointing, thruster allocation) on the MESSENGER-like layout of Tables 2&ndash;3. It exists to <b>check numbers</b> from the students&rsquo; own code, not to supply code: compare outputs, column by column. The orbits, time of flight, mass, sensor bore-sight and the thrust bound are all adjustable.</p>
+</header>
+<div id="gate" style="display:none;position:fixed;inset:0;z-index:99;background:#0e2a3b;color:#fff;align-items:center;justify-content:center;flex-direction:column;gap:10px;font:15px system-ui">
+  <div style="font-size:18px;font-weight:600">Hohmann / finite-burn debugging reference</div>
+  <form id="gateForm" style="display:flex;gap:6px"><input id="gatePw" type="password" placeholder="Password" autocomplete="off" style="padding:8px;border-radius:6px;border:0"><button style="padding:8px 14px;background:#e4572e;color:#fff;border:0;border-radius:6px">Enter</button></form>
+  <div id="gateMsg" style="color:#f5a;min-height:18px"></div>
+</div>
+<script>
+/* Casual-visitor gate only: NOT security. The page source and repo remain readable. Same salt/hash as the other Tutorials pages. */
+(function(){const SALT="airdrop-v1:",HASH="05487323df5a65e4878c1fea5eec7448c514b23e4c6bd352cb80857801b22efd";
+  if(!HASH)return;
+  let ok=false;try{ok=sessionStorage.getItem("gate_ok")===HASH;}catch(e){}
+  if(ok)return;
+  const g=document.getElementById("gate");g.style.display="flex";document.documentElement.classList.add("locked");
+  async function h(t){const b=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(SALT+t));return [...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,"0")).join("");}
+  document.getElementById("gateForm").onsubmit=async e=>{e.preventDefault();
+    if(!(window.crypto&&crypto.subtle)){document.getElementById("gateMsg").textContent="Needs https or a local file.";return;}
+    if(await h(document.getElementById("gatePw").value)===HASH){try{sessionStorage.setItem("gate_ok",HASH);}catch(e){}g.style.display="none";document.documentElement.classList.remove("locked");window.dispatchEvent(new Event("resize"));}
+    else document.getElementById("gateMsg").textContent="Incorrect password.";};
+})();
+</script>
+<div id="app">
+<aside id="side">
+  <div class="card">
+    <h3>1 · Hohmann orbits and time of flight</h3>
+    <div class="row"><label for="r1">r<sub>1</sub> (km)</label><input id="r1" type="range" min="6700" max="9000" step="10" value="7000"><span class="v" id="r1v"></span></div>
+    <div class="row"><label for="r2">r<sub>2</sub> (km)</label><input id="r2" type="range" min="6700" max="12000" step="10" value="7250"><span class="v" id="r2v"></span></div>
+    <div class="row"><label for="tofr">TOF / T<sub>H</sub></label><input id="tofr" type="range" min="0.94" max="1.06" step="0.0005" value="1"><span class="v" id="tofrv"></span></div>
+    <div class="presets"><button id="pH">TOF = Hohmann</button><button id="pPaper">Paper example</button></div>
+    <div id="hinfo" class="note"></div>
+    <p class="note">Start at (r<sub>1</sub>, 0) on a circular orbit, arrive at (&minus;r<sub>2</sub>, 0): a 180&deg; coplanar transfer, prograde. Any TOF other than T<sub>H</sub> is a non-Hohmann Lambert arc.</p>
+  </div>
+  <div class="card">
+    <h3>2 · Sensor bore-sight (body frame)</h3>
+    <div class="row"><label for="psi">&psi; from LVA axis</label><input id="psi" type="range" min="0" max="180" step="1" value="90"><span class="v" id="psiv"></span></div>
+    <div class="row"><label for="phi">&phi; about LVA</label><input id="phi" type="range" min="-180" max="180" step="1" value="0"><span class="v" id="phiv"></span></div>
+    <div class="presets"><button id="bPaper">Paper: s = b&#8321; (90&deg;, 0&deg;)</button><button id="bB2">along b&#8322; (90&deg;, 90&deg;)</button><button id="bTilt">tilted 60&deg;</button></div>
+    <div id="binfo" class="note"></div>
+    <p class="note">s<sup>B</sup> = (sin&psi; cos&phi;, sin&psi; sin&phi;, cos&psi;) in the body axes; the LVA thrusts along +b&#8323;. The bore-sight is held on the Earth centre; the roll is the one that puts the LVA axis as close as possible to the commanded thrust at burn 1.</p>
+  </div>
+  <div class="card">
+    <h3>3 · Spacecraft and limits</h3>
+    <div class="row"><label for="m0">m<sub>0</sub> (kg)</label><input id="m0" type="number" value="897" min="100" step="1"></div>
+    <div class="presets"><button id="m897">897 (implied by Tables 4&ndash;5)</button><button id="m1107">1107 (Table 2)</button></div>
+    <div class="row"><label for="bmode">Finite-burn T<sub>max</sub></label><select id="bmode"><option value="cap">capability of each allocation</option><option value="paper">paper constants (667 / 22 N)</option><option value="custom">custom</option></select></div>
+    <div class="row"><label for="bLVA">LVA+ACS (N)</label><input id="bLVA" type="number" value="759.6" step="any"></div>
+    <div class="row"><label for="bACS">ACS (N)</label><input id="bACS" type="number" value="92.6" step="any"></div>
+    <div class="row"><label for="tau">Wheel &tau;<sub>max</sub> (N&middot;m)</label><input id="tau" type="number" value="0.075" step="any"></div>
+    <div class="row"><label for="lam">Reg. &lambda; scale</label><input id="lam" type="number" value="1e-6" step="any"></div>
+    <div class="row"><label for="tolr">Arrival tol (km)</label><input id="tolr" type="number" value="1" step="any"></div>
+    <div class="row"><label for="tolv">&nbsp;&nbsp;&nbsp;(m/s)</label><input id="tolv" type="number" value="1" step="any"></div>
+    <div class="row"><label for="tols">Thrust shortfall tol (%)</label><input id="tols" type="number" value="2" step="any"></div>
+    <p class="note" id="capnote"></p>
+  </div>
+  <div class="card"><button class="go" id="sim" style="width:100%">Simulate (run and play)</button><div id="runinfo" class="note"></div></div>
+</aside>
+<div id="views">
+  <div class="card dbg"><b>How to use this.</b> Set the same inputs your code uses and compare the table below, line by line (fuel, &Delta;v, burn times, peak wheel torque, arrival error). Where the paper&rsquo;s own table has a number, it is shown beneath for reference. Anything here that disagrees with your code is a question to ask, not yet a verdict: the definitions used are listed in <i>Definitions and things to check</i> at the bottom. This is an independent re-implementation, validated against a separate Python/SciPy version and against the paper&rsquo;s Hohmann row; it is not the authors&rsquo; MATLAB code.</div>
+  <div class="card"><div class="hd"><b>Results: from impulsive Hohmann to allocated thrust</b><span id="verdict"></span></div><div class="tw" id="tbl"></div>
+    <p class="note">Fuel = propellant mass used. Hohmann: rocket equation, Isp 316 s. Finite burn: integrated mass (ideal single thruster, Isp 316 s). Allocation: per-thruster Isp (316 / 235 / 220 s). &lsquo;Wasted&rsquo; = (&Sigma;T<sub>i</sub> &minus; |net|)/|net|, i.e. thrust that cancels. &lsquo;Shortfall&rsquo; = |delivered &minus; commanded| / |commanded|, body frame.</p></div>
+    <div class="card"><div class="hd"><b>Finite-burn solution p = [p<sub>1</sub>, &hellip;, p<sub>9</sub>]<sup>T</sup></b></div><div class="tw" id="pvec"></div>
+    <p class="note">Paper ordering: p<sub>1</sub> = burn-1 duration t<sub>1</sub> (s), p<sub>2..4</sub> = T<sub>0</sub> (N, inertial, constant over burn 1), p<sub>5</sub> = coast t<sub>c</sub> (s), p<sub>6</sub> = burn-2 duration t<sub>3</sub> (s), p<sub>7..9</sub> = T<sub>f</sub> (N). Planar case: z components are 0. Compare with your own p* before looking at anything downstream.</p></div>
+  <div class="panels">
+    <div class="card"><div class="hd"><b>Transfer in the orbit plane</b><span class="tabs" id="tabsT"><button data-k="all" class="on">all</button><button data-k="A">LVA+ACS</button><button data-k="B">ACS</button></span></div><canvas id="cvOrbit" style="aspect-ratio:1.05"></canvas>
+      <div class="leg" id="legOrbit"></div>
+      <div class="row"><label for="tplay">time</label><input id="tplay" type="range" min="0" max="1" step="0.5" value="0"><span class="v" id="tplayv" style="width:150px"></span></div></div>
+    <div class="card"><div class="hd"><b>Arrival error (km, relative to the target point)</b></div><canvas id="cvMiss" style="aspect-ratio:1.05"></canvas><div class="leg" id="legMiss"></div></div>
+  </div>
+  <div class="panels">
+    <div class="card"><div class="hd"><b>Lambert solution versus time of flight</b></div><canvas id="cvLam" style="aspect-ratio:1.9"></canvas>
+      <div class="leg"><span><i style="background:#0072B2"></i>total &Delta;v</span><span><i style="background:#D55E00"></i>|radial part of the departure &Delta;v|</span><span><i style="background:#888"></i>current TOF</span></div></div>
+    <div class="card"><div class="hd"><b>Approach A across TOF</b><button id="swTof">Run TOF sweep</button></div><canvas id="cvSwTof" style="aspect-ratio:1.9"></canvas>
+      <div class="leg"><span><i style="background:#D55E00"></i>LVA+ACS</span><span><i style="background:#0072B2"></i>ACS only</span><span>dashed: arrival tolerance &middot; &times; = finite burn does not exist</span></div><div id="swTofInfo" class="note"></div></div>
+  </div>
+  <div class="card"><div class="hd"><b>Allocation, torques and constraints</b><span class="tabs" id="tabsA"><button data-k="A" class="on">LVA+ACS</button><button data-k="B">ACS only</button></span></div>
+    <div class="chk" id="chk"></div></div>
+  <div class="panels">
+    <div class="card"><div class="hd"><b>Thruster throttles &beta;<sub>i</sub>(t) (burn 1 | burn 2)</b></div><canvas id="cvBeta" style="aspect-ratio:1.5"></canvas><div class="leg"><span>white = off, blue = on, orange = saturated (&beta; = 1)</span></div></div>
+    <div class="card"><div class="hd"><b>Throttles at the playhead</b></div><canvas id="cvBars" style="aspect-ratio:1.5"></canvas><div id="readout" class="note"></div></div>
+  </div>
+  <div class="panels">
+    <div class="card"><div class="hd"><b>Axial force (b&#8323;): commanded and delivered</b></div><canvas id="cvFz" style="aspect-ratio:1.6"></canvas><div class="leg"><span><i style="background:#1c2733"></i>commanded</span><span><i style="background:#D55E00"></i>delivered</span></div></div>
+    <div class="card"><div class="hd"><b>Lateral force (b&#8321;, b&#8322;) against the allocation&rsquo;s authority</b></div><canvas id="cvFx" style="aspect-ratio:1.6"></canvas><div class="leg"><span><i style="background:#1c2733"></i>commanded b&#8321;</span><span><i style="background:#D55E00"></i>delivered b&#8321;</span><span><i style="background:#0072B2"></i>commanded b&#8322;</span><span><i style="background:#999"></i>&plusmn; authority</span></div></div>
+    <div class="card"><div class="hd"><b>Reaction-wheel torque against its limit</b></div><canvas id="cvTau" style="aspect-ratio:1.6"></canvas><div class="leg"><span><i style="background:#D55E00"></i>&tau;<sub>x</sub></span><span><i style="background:#0072B2"></i>&tau;<sub>y</sub></span><span><i style="background:#009E73"></i>&tau;<sub>z</sub></span><span><i style="background:#b00020"></i>&plusmn;&tau;<sub>max</sub></span></div></div>
+    <div class="card"><div class="hd"><b>Wasted thrust and shortfall</b></div><canvas id="cvWs" style="aspect-ratio:1.6"></canvas><div class="leg"><span><i style="background:#D55E00"></i>wasted %</span><span><i style="background:#0072B2"></i>shortfall %</span></div></div>
+  </div>
+  <div class="card"><div class="hd"><b>Bore-sight sweep (&psi;, at the current &phi;): what the sequential approach cannot see</b><button id="swPsi">Run &psi; sweep</button></div><canvas id="cvSwPsi" style="aspect-ratio:2.6"></canvas>
+    <div class="leg"><span><i style="background:#D55E00"></i>LVA+ACS</span><span><i style="background:#0072B2"></i>ACS only</span><span>solid: arrival error (km) &middot; dotted: max thrust shortfall (%, right axis)</span></div><div id="swPsiInfo" class="note"></div></div>
+  <div class="card theory"><details open><summary>Definitions and things to check</summary><h2>Definitions and things to check</h2>
+<div class="callout"><b>Status of this page.</b> Everything here is computed by an independent re-implementation, in the browser, of the sequential approach (Approach A) described in the draft. It reproduces the paper&rsquo;s Hohmann row and, using the paper&rsquo;s printed P*, the ACS row of Table 4. It is a checking tool: the numbers are meant to be compared with your own, and a mismatch is a question, not a verdict. The coupled approaches (B, AB) are not implemented here.</div>
+<h4>Conventions used</h4>
+<ul>
+<li><b>Geometry.</b> Two-body, planar. Start at (r<sub>1</sub>, 0) on a circular orbit, arrive at (&minus;r<sub>2</sub>, 0) on a circular orbit: a 180&deg; transfer. Lambert (0 revolutions, prograde, Izzo&rsquo;s formulation with the plane normal supplied explicitly because the 180&deg; plane is otherwise undefined) is solved for the chosen TOF.</li>
+<li><b>Spacecraft.</b> MESSENGER-like: 17 thrusters (Table 3 positions and directions; T<sub>max</sub> = 667 / 22 / 4.4 N; I<sub>sp</sub> = 316 / 235 / 220 s), J from Eq. 19, three ideal wheels along b<sub>1</sub>, b<sub>2</sub>, b<sub>3</sub>. The LVA thrusts along +b<sub>3</sub>. &lsquo;ACS only&rsquo; removes the LVA; &lsquo;LVA+ACS&rsquo; keeps all 17.</li>
+<li><b>Stage 2 (finite burn).</b> Burn&ndash;coast&ndash;burn, constant inertial thrust vector in each burn, ideal single thruster with mass flow |T|/(I<sub>sp</sub>g) at 316 s. The cost is p<sub>1</sub>|T<sub>0</sub>| + p<sub>6</sub>|T<sub>f</sub>|. The thrust bound is on the <i>norm</i>, and it is active in both burns, so the optimum is found by solving the four boundary conditions for the two burn durations and the two thrust directions. This agrees with a general SQP solution (checked) and is not the same as the per-component box |p<sub>i</sub>| &le; T<sub>max</sub> of Eq. 27.</li>
+<li><b>Pointing.</b> The bore-sight is held on the Earth centre with no roll about it. In this planar problem that makes the body rotate rigidly with the line of sight. The initial roll is the one that puts the LVA axis closest to the commanded thrust at burn 1. &tau;<sub>pointing</sub> = J&alpha; + &omega;&times;J&omega; from Eqs. 52&ndash;95.</li>
+<li><b>Stage 3 (allocation).</b> At each instant solve min &frac12;|A&beta;T<sub>max</sub> &minus; T<sup>B</sup>|&sup2; + &frac12;&Sigma;&lambda;<sub>i</sub>&beta;<sub>i</sub>&sup2; with 0 &le; &beta; &le; 1 and &lambda;<sub>i</sub> = &lambda; T<sub>max,i</sub>&sup2;, &lambda; = 10<sup>&minus;6</sup> (Eq. 41, read as a penalty on thrust in newtons). Wheels supply &tau;<sub>pointing</sub> &minus; &tau;<sub>thrusters</sub>. The <i>delivered</i> thrust is then re-propagated with the actual mass flow, and the arrival error is measured against the target.</li>
+<li><b>Wasted thrust</b> = (&Sigma;T<sub>i</sub> &minus; |net thrust|)/|net thrust|. <b>Shortfall</b> = |delivered &minus; commanded|/|commanded| in the body frame. <b>Fuel</b> for the allocation rows is &int;&Sigma;T<sub>i</sub>/(I<sub>sp,i</sub>g) dt. &Delta;v for finite-burn and allocation rows is &int;|net thrust|/m dt.</li>
+<li><b>Thrust bound for stage 2.</b> The finite burn needs a T<sub>max</sub>, and it depends on the allocation. &lsquo;Capability&rsquo; is the largest net force along +b<sub>3</sub> that the allocation can give with no lateral force, computed from the layout: 759.6 N for LVA+ACS and 92.6 N for ACS only (4 &times; 22 N from C1&ndash;C4 plus 4.6 N from the canted attitude thrusters). The paper uses 667 N and tries 22 N; both are selectable.</li>
+</ul>
+<h4>What the numbers say for the paper&rsquo;s example (r<sub>1</sub> = 7000, r<sub>2</sub> = 7250 km, TOF = T<sub>H</sub>)</h4>
+<ul>
+<li><b>Agreement.</b> Hohmann &Delta;v 131.236 m/s and fuel 37.19 kg (paper 37.195) with m<sub>0</sub> = 897 kg; burn times 88.1 / 85.5 s against 88.21 / 85.04 s; with the paper&rsquo;s printed P*, the ACS allocation gives 8.08 kg, 17.87 m/s and a peak wheel torque of 4.315 N&middot;m (paper 8.0867, 17.839, 4.3142).</li>
+<li><b>Mass.</b> Table 2 gives 1107 kg, but Tables 4&ndash;5 correspond to about 897 kg: with 1107 kg the Hohmann fuel is 45.9 kg and the burns last 109 s and 106 s, not 88 and 85. Check which mass the code uses.</li>
+<li><b>Bound on the thrust vector.</b> The printed P* has |T<sub>0</sub>| = 677.6 N, above the 667 N LVA limit, because Eq. 27 bounds each component rather than the norm.</li>
+<li><b>Where the LVA+ACS row differs.</b> This tool gives about 40.3 kg (paper 38.014) and an arrival error of about 17 km, because the commanded inertial thrust stays fixed while the body turns with the line of sight (about 5.4&deg; in burn 1), so the sideways demand grows from about 31 N to about 63 N against about 16 N of sideways authority. The paper&rsquo;s Table 4 reports no arrival error for Approach A. Worth checking in the students&rsquo; code: the delivered thrust, not the commanded one, should be propagated, and the arrival error reported.</li>
+<li><b>The allocation is weakly determined when saturated.</b> With &lambda; = 10<sup>&minus;6</sup>, differences between allocations that give the same force cost about 10<sup>&minus;4</sup> N&sup2;, below typical solver tolerances. When the demand cannot be met (ACS only), two exact solvers returned peak wheel torques of 1.78 and 2.15 N&middot;m for the same demand. Compare delivered force, fuel and arrival error rather than individual &beta;<sub>i</sub> or peak torque in such cases.</li>
+<li><b>ACS only: where it fails.</b> It can deliver 92.6 N along the LVA axis but only about 16 N sideways. At the Hohmann TOF the burns (14.7 and 13.5 min) turn the line of sight through about 55&deg;, so a constant inertial thrust vector cannot be delivered: 77% peak shortfall and 143 km arrival error. Away from the Hohmann TOF the problem is harder still: no burn-coast-burn plan was found for TOF more than about +15 s or &minus;17 s from T<sub>H</sub> (the general SQP check also found none from 10 random starts at +0.5% and +2%; this is evidence, not a proof). The 22 N figure is not the limit; the sideways authority and the rotation of the line of sight are.</li>
+<li><b>LVA+ACS: where it works.</b> Arrival error is 16 km at the Hohmann TOF, falls to 0.76 km at TOF = 2989.7 s, and exceeds 100 km beyond about +11 s / &minus;17 s. The bore-sight matters: with &psi; = 90&deg; the LVA axis is tangent at the start of burn 1 but the body turns with the line of sight, so &psi; slightly above 90&deg; (95&deg;: 1.6 km) partly compensates; &psi; = 60&deg; gives 285 km. &phi; barely changes the arrival error but changes the peak wheel torque (0.75 N&middot;m at &phi; = 0, 0.57 at 90&deg;).</li>
+</ul>
+<h4>Not included</h4>
+<p>Approach B / AB (allocation and wheel limits inside the optimiser), wheel momentum limits, the multi-revolution and non-coplanar cases, and the three further examples of Table 7. Wheel power is not reported because its initial momentum is not specified in the draft.</p>
+</details></div>
+</div>
+</div>
+<script>
+const E_ENG=(function(){const module={exports:{}};
+/* Hohmann / finite-burn / thruster-allocation reference engine (no DOM).  Independent re-implementation of the Approach-A
+   pipeline of Sims & Wolek (Lambert -> burn-coast-burn finite burn -> pointing law -> thruster allocation).
+   Units: km, s, kg, N.  Planar (z=0) transfer.  Shared by index.html (inlined by build.py) and validate/test.js. */
+const MU=398600.4418, RE=6378.137, G0=9.80665, DEG=Math.PI/180;
+/* MESSENGER-like layout, paper Table 3 (position from COM, m; force direction on the S/C), Eq.(20), Table 2 */
+const POS=[[0,0,-.7920],[-.5406,-.4457,-.6674],[-.5395,.4445,-.6672],[.5404,-.4451,-.6670],[.5396,.4449,-.6671],
+ [-.6412,-.3068,-.6121],[-.6422,.3067,-.6121],[-.6425,-.3113,.7019],[-.6431,.3071,.7018],[.6411,-.3056,-.6105],
+ [.6403,.3069,-.6115],[.6404,-.3086,.7017],[.6403,.3084,.7021],[-.5136,.4858,-.4629],[.5114,.4867,.5533],
+ [-.2685,-.9577,.0369],[.2692,-.9571,.0376]];
+const DIR0=[[0,0,1],[0,0,1],[0,0,1],[0,0,1],[0,0,1],[.9328,-.2505,.2591],[.9328,.2505,.2591],[.9331,-.2506,-.2579],[.9331,.2506,-.2579],
+ [-.9328,-.2505,.2591],[-.9328,.2505,.2591],[-.9331,-.2506,-.2579],[-.9331,.2506,-.2579],[0,-1,0],[0,-1,0],[0,1,0],[0,1,0]];
+const DIR=DIR0.map(d=>{const n=Math.hypot(...d);return d.map(x=>x/n);});
+const TMAX=[667,22,22,22,22,4.4,4.4,4.4,4.4,4.4,4.4,4.4,4.4,4.4,4.4,4.4,4.4];
+const ISP=[316,235,235,235,235,220,220,220,220,220,220,220,220,220,220,220,220];
+const NAMES=['LVA','C1','C2','C3','C4','A1','A2','A3','A4','B1','B2','B3','B4','S1','S2','P1','P2'];
+const JB=[[408,-.11,0],[-.11,406.2,4.54],[0,4.54,536.1]];
+const N=17, CFGS={'LVA+ACS':TMAX.map(()=>1),'ACS':TMAX.map((_,i)=>i?1:0)};
+/* ---------- small linear algebra ---------- */
+const dot=(a,b)=>{let s=0;for(let i=0;i<a.length;i++)s+=a[i]*b[i];return s;};
+const cross=(u,v)=>[u[1]*v[2]-u[2]*v[1],u[2]*v[0]-u[0]*v[2],u[0]*v[1]-u[1]*v[0]];
+const add=(a,b)=>a.map((x,i)=>x+b[i]), sub=(a,b)=>a.map((x,i)=>x-b[i]), mul=(a,s)=>a.map(x=>x*s), nrm=a=>Math.hypot(...a);
+const mv=(M,x)=>M.map(r=>dot(r,x)), mT=(M)=>M[0].map((_,j)=>M.map(r=>r[j]));
+const mm=(A,B)=>A.map(r=>B[0].map((_,j)=>r.reduce((s,a,k)=>s+a*B[k][j],0)));
+function solve(A,b){const n=b.length,M=A.map((r,i)=>[...r,b[i]]);
+  for(let c=0;c<n;c++){let p=c;for(let r=c+1;r<n;r++)if(Math.abs(M[r][c])>Math.abs(M[p][c]))p=r;
+    [M[c],M[p]]=[M[p],M[c]];const d=M[c][c];if(Math.abs(d)<1e-300)return null;
+    for(let r=c+1;r<n;r++){const f=M[r][c]/d;if(f)for(let k=c;k<=n;k++)M[r][k]-=f*M[c][k];}}
+  const x=new Array(n);for(let i=n-1;i>=0;i--){let s=M[i][n];for(let k=i+1;k<n;k++)s-=M[i][k]*x[k];x[i]=s/M[i][i];}return x;}
+const Rz=a=>{const c=Math.cos(a),s=Math.sin(a);return [[c,-s,0],[s,c,0],[0,0,1]];};
+const col=(M,j)=>M.map(r=>r[j]);
+/* ---------- Hohmann and Lambert (Izzo lambda formulation; explicit plane normal so the 180-deg geometry is well posed) ---------- */
+function hohmann(r1,r2,m0,isp=316){
+  const v1=Math.sqrt(MU/r1),v2=Math.sqrt(MU/r2),a=(r1+r2)/2,vp=Math.sqrt(MU*(2/r1-1/a)),va=Math.sqrt(MU*(2/r2-1/a));
+  const dv1=vp-v1,dv2=v2-va,tof=Math.PI*Math.sqrt(a**3/MU);
+  return {v1,v2,dv1,dv2,dv:(dv1+dv2)*1e3,tof,vp,va,fuel:m0*(1-Math.exp(-(dv1+dv2)*1e3/(isp*G0)))};}
+function Tx(x,lam){                                    // normalised time of flight (Lagrange form, Izzo's x-variable), 0 revolutions
+  if(Math.abs(x-1)<1e-10)return 2/3*(1-lam**3);
+  const a=1/(1-x*x);
+  if(a>0){const al=2*Math.acos(Math.max(-1,Math.min(1,x))),be=(lam<0?-1:1)*2*Math.asin(Math.min(1,Math.abs(lam)*Math.sqrt(1-x*x)));
+    return a*Math.sqrt(a)*((al-Math.sin(al))-(be-Math.sin(be)))/2;}
+  const al=2*Math.acosh(x),be=(lam<0?-1:1)*2*Math.asinh(Math.abs(lam)*Math.sqrt(x*x-1));
+  return -a*Math.sqrt(-a)*((be-Math.sinh(be))-(al-Math.sinh(al)))/2;}
+function lambert(r1v,r2v,tof,normal=[0,0,1]){
+  const r1=nrm(r1v),r2=nrm(r2v),c=nrm(sub(r2v,r1v)),s=(r1+r2+c)/2;let lam=Math.sqrt(Math.max(0,1-c/s));
+  if(dot(cross(r1v,r2v),normal)<0)lam=-lam;
+  const Tt=Math.sqrt(2*MU/(s**3))*tof;
+  let lo=-1+1e-12,hi=2;while(Tx(hi,lam)>Tt&&hi<1e8)hi*=2;           // T(x) decreases with x
+  if(Tx(lo,lam)<Tt)return null;
+  for(let i=0;i<200;i++){const mid=(lo+hi)/2;if(Tx(mid,lam)>Tt)lo=mid;else hi=mid;if(hi-lo<1e-15*(1+Math.abs(lo)))break;}
+  const x=(lo+hi)/2,y=Math.sqrt(1-lam*lam*(1-x*x)),gam=Math.sqrt(MU*s/2),rho=(r1-r2)/c,sig=Math.sqrt(Math.max(0,1-rho*rho));
+  const vr1=gam*((lam*y-x)-rho*(lam*y+x))/r1,vr2=-gam*((lam*y-x)+rho*(lam*y+x))/r2,vt1=gam*sig*(y+lam*x)/r1,vt2=gam*sig*(y+lam*x)/r2;
+  const ir1=mul(r1v,1/r1),ir2=mul(r2v,1/r2);let it1=cross(normal,ir1),it2=cross(normal,ir2);if(lam<0){it1=mul(it1,-1);it2=mul(it2,-1);}
+  return {v1:add(mul(ir1,vr1),mul(it1,vt1)),v2:add(mul(ir2,vr2),mul(it2,vt2)),x};}
+/* ---------- integration (fixed-step RK4; planar state [x,y,vx,vy,m,dvAcc]) ---------- */
+function rk4(f,s,t0,dur,dt){const n=Math.max(1,Math.ceil(dur/dt)),h=dur/n;let t=t0;
+  for(let i=0;i<n;i++){const k1=f(t,s),s2=s.map((v,j)=>v+h/2*k1[j]),k2=f(t+h/2,s2),s3=s.map((v,j)=>v+h/2*k2[j]),k3=f(t+h/2,s3),
+    s4=s.map((v,j)=>v+h*k3[j]),k4=f(t+h,s4);s=s.map((v,j)=>v+h/6*(k1[j]+2*k2[j]+2*k3[j]+k4[j]));t+=h;}return s;}
+const gravT=(s,T,isp)=>{const rn=Math.hypot(s[0],s[1]),m=s[4];
+  return [s[2],s[3],-MU*s[0]/rn**3+T[0]/m/1e3,-MU*s[1]/rn**3+T[1]/m/1e3,-Math.hypot(T[0],T[1])/(isp*G0),Math.hypot(T[0],T[1])/m];};
+function bcb(p,r0,v0,m0,isp=316){      // p=[t1,T0x,T0y,tc,t3,Tfx,Tfy]; returns the four epoch states
+  const s0=[r0[0],r0[1],v0[0],v0[1],m0,0],T0=[p[1],p[2]],Tf=[p[5],p[6]],z=[0,0];
+  const s1=rk4((t,s)=>gravT(s,T0,isp),s0,0,p[0],1.0),s2=rk4((t,s)=>gravT(s,z,isp),s1,0,p[3],5.0),s3=rk4((t,s)=>gravT(s,Tf,isp),s2,0,p[4],1.0);
+  return [s0,s1,s2,s3];}
+/* ---------- stage 2: finite burn (ideal single thruster, norm bound active on both burns; Newton on t1,phi1,t3,phi2) ---------- */
+function finiteBurnCore(r0,v0,rf,vf,m0,tof,Tmax0,sf,isp,guess){const Tmax=Tmax0*sf;
+  const lam=lambert([...r0,0],[...rf,0],tof);if(!lam)return {ok:false,why:'no Lambert solution at this TOF'};
+  const dv0=sub(lam.v1.slice(0,2),v0),dvf=sub(vf,lam.v2.slice(0,2));
+  const t1g=m0*nrm(dv0)*1e3/Tmax,m2=m0*Math.exp(-nrm(dv0)*1e3/(isp*G0)),t3g=m2*nrm(dvf)*1e3/Tmax;
+  const unpack=z=>[z[0]*100,Tmax*Math.cos(z[1]),Tmax*Math.sin(z[1]),tof-z[0]*100-z[2]*100,z[2]*100,Tmax*Math.cos(z[3]),Tmax*Math.sin(z[3])];
+  let evals=0;const F=z=>{evals++;const p=unpack(z);if(p[3]<0||p[0]<0||p[4]<0){/* allow negative coast in the iteration: propagate backwards impossible -> penalise */}
+    const s=bcb(p.map((v,i)=>i===3?Math.max(v,0):(i===0||i===4?Math.max(v,0):v)),r0,v0,m0,isp)[3];
+    return [(s[0]-rf[0])/10,(s[1]-rf[1])/10,(s[2]-vf[0])*1e3,(s[3]-vf[1])*1e3];};
+  let z=guess?guess.slice():[t1g/100,Math.atan2(dv0[1],dv0[0]),t3g/100,Math.atan2(dvf[1],dvf[0])],f=F(z),it=0,mu=1e-3;
+  for(;it<60;it++){const fn=nrm(f);if(fn<1e-8)break;                       // Levenberg-Marquardt on the 4x4 boundary-condition system
+    const Jc=[0,1,2,3].map(k=>{const zz=z.slice();const h=1e-6*(k%2?1:Math.max(1,Math.abs(z[k])));zz[k]+=h;const fk=F(zz);return fk.map((v,i)=>(v-f[i])/h);});
+    const J=[0,1,2,3].map(i=>[0,1,2,3].map(k=>Jc[k][i])),JT=mT(J),JTJ=mm(JT,J),g=mv(JT,f);let accepted=false;
+    for(let tr=0;tr<14;tr++){const A=JTJ.map((r,a)=>r.map((v,b)=>v+(a===b?mu*(JTJ[a][a]+1e-12):0)));const d=solve(A,g.map(v=>-v));if(!d){mu*=10;continue;}
+      const zn=z.map((v,k)=>v+d[k]),fnw=F(zn);if(nrm(fnw)<fn){z=zn;f=fnw;mu=Math.max(mu/4,1e-12);accepted=true;break;}mu*=6;}
+    if(!accepted)break;}
+  const p=unpack(z),res=nrm(f),sts=bcb(p.map((v,i)=>(i===0||i===3||i===4)?Math.max(v,0):v),r0,v0,m0,isp);
+  const sT=sts[3],err_r=Math.hypot(sT[0]-rf[0],sT[1]-rf[1]),err_v=Math.hypot(sT[2]-vf[0],sT[3]-vf[1])*1e3;
+  const conv=res<1e-6&&p[3]>=0&&p[0]>=0&&p[4]>=0;
+  return {ok:conv,z,why:conv?'':(res<1e-6?'the burns would not fit in the TOF (coast < 0)':'no solution found by the solver'),p,iters:it,evals,err_r,err_v,
+    fuel:m0-sT[4],dv:sT[5],J:p[0]*Math.hypot(p[1],p[2])+p[4]*Math.hypot(p[5],p[6]),states:sts,lam,
+    minAltitude:null};}
+/* Burn-coast-burn finite burn.  First tries the thrust norm at its bound in both burns (4 equations, 4 unknowns).  If that has no solution that fits
+   in the TOF, the common thrust fraction is lowered (longer burns) until one exists, so the result is a feasible plan whose burns are as short as that allows. */
+function finiteBurn(r0,v0,rf,vf,m0,tof,Tmax,isp=316,guess=null){
+  let last=null,g=guess;
+  for(const sf of [1,0.6]){
+    let R=finiteBurnCore(r0,v0,rf,vf,m0,tof,Tmax,sf,isp,g&&sf===1?g:null);
+    if(!R.ok&&g&&sf===1)R=finiteBurnCore(r0,v0,rf,vf,m0,tof,Tmax,sf,isp,null);
+    if(R.ok){R.sf=sf;return R;}last=R;g=null;if(!last.p&&!last.lam)break;}
+  last.sf=0;last.why='no burn-coast-burn plan found with the thrust at or below its bound ('+last.why+')';return last;}
+/* ---------- bounded least squares for the allocation: primal active set, solved in thrust units u_i = Tmax_i*beta_i ---------- */
+function bqp(H,q,lo,hi,iters=400){
+  const n=q.length,b=lo.map((l,i)=>Math.min(Math.max(0,l),hi[i])),at=new Array(n).fill(0),fixed=hi.map((h,i)=>h-lo[i]<1e-15);
+  for(let i=0;i<n;i++){if(b[i]<=lo[i]+1e-15)at[i]=-1;if(fixed[i])at[i]=-1;}
+  for(let it=0;it<iters;it++){
+    const fr=[];for(let i=0;i<n;i++)if(at[i]===0)fr.push(i);
+    const g=H.map((r,i)=>dot(r,b)-q[i]),d=new Array(n).fill(0);
+    if(fr.length){const sol=solve(fr.map(i=>fr.map(j=>H[i][j])),fr.map(i=>-g[i]));if(!sol)break;fr.forEach((i,k)=>d[i]=sol[k]);}
+    if(Math.max(...d.map(Math.abs))<1e-8){let k=-1,v=1e-9;for(let i=0;i<n;i++){if(fixed[i])continue;const vi=at[i]===-1?-g[i]:(at[i]===1?g[i]:0);if(vi>v){v=vi;k=i;}}
+      if(k<0)break;at[k]=0;continue;}
+    let alpha=1,blk=-1,side=0;
+    for(const k of fr){if(d[k]>1e-18){const a=(hi[k]-b[k])/d[k];if(a<alpha){alpha=a;blk=k;side=1;}}
+      else if(d[k]<-1e-18){const a=(lo[k]-b[k])/d[k];if(a<alpha){alpha=a;blk=k;side=-1;}}}
+    for(let i=0;i<n;i++)b[i]+=alpha*d[i];
+    if(blk>=0){b[blk]=side===1?hi[blk]:lo[blk];at[blk]=side;}}
+  return b;}
+const HCACHE={};
+function Hmat(lamScale){const key=String(lamScale);if(HCACHE[key])return HCACHE[key];
+  const H=[];for(let i=0;i<N;i++){H.push([]);for(let j=0;j<N;j++)H[i].push(dot(DIR[i],DIR[j])+(i===j?lamScale:0));}return HCACHE[key]=H;}
+/* min 1/2|D u - Tb|^2 + 1/2 lamScale |u|^2, 0<=u_i<=Tmax_i*mask_i   (paper Eq.41 with lambda_i = lamScale*Tmax_i^2). Returns u (N). */
+function allocate(Tb,cfg,lamScale=1e-6){const mask=CFGS[cfg],q=DIR.map(d=>dot(d,Tb));
+  return bqp(Hmat(lamScale),q,new Array(N).fill(0),TMAX.map((t,i)=>t*mask[i]));}
+const forceOf=u=>{const f=[0,0,0];for(let i=0;i<N;i++)for(let k=0;k<3;k++)f[k]+=DIR[i][k]*u[i];return f;};
+const torqueOf=u=>{const t=[0,0,0];for(let i=0;i<N;i++){const c=cross(POS[i],mul(DIR[i],u[i]));for(let k=0;k<3;k++)t[k]+=c[k];}return t;};
+/* largest force along +b3 with zero lateral force: bisection on the feasibility of D u = F e3 */
+function maxForward(cfg){let lo=0,hi=800;const mask=CFGS[cfg];
+  for(let it=0;it<50;it++){const F=(lo+hi)/2,u=allocate([0,0,F],cfg,1e-9),r=sub(forceOf(u),[0,0,F]);if(nrm(r)<1e-3)lo=F;else hi=F;}return lo;}
+/* largest force along an arbitrary body-frame unit direction with zero force in the other two directions */
+function maxAlong(cfg,dir){let lo=0,hi=800;for(let it=0;it<50;it++){const F=(lo+hi)/2,u=allocate(mul(dir,F),cfg,1e-9),r=sub(forceOf(u),mul(dir,F));if(nrm(r)<1e-3)lo=F;else hi=F;}return lo;}
+/* ---------- attitude: pointing law (boresight locked on the Earth centre, no roll) ---------- */
+const sBody=(psi,phi)=>[Math.sin(psi*DEG)*Math.cos(phi*DEG),Math.sin(psi*DEG)*Math.sin(phi*DEG),Math.cos(psi*DEG)];
+function initialAttitude(r0,T0dir,psi,phi){          // body->inertial DCM, columns b1,b2,b3
+  const P=psi*DEG,F=phi*DEG,n=nrm(r0),rh=[r0[0]/n,r0[1]/n,0],d=mul(rh,-1),th=cross([0,0,1],rh);let best=null;
+  for(const sg of [1,-1]){const t=mul(th,sg),b3=add(mul(d,Math.cos(P)),mul(t,Math.sin(P))),sc=dot(b3,[T0dir[0],T0dir[1],0]);if(!best||sc>best.sc)best={sc,t,b3};}
+  const {t,b3}=best,w=sub(mul(d,Math.sin(P)),mul(t,Math.cos(P))),Q=cross(b3,w);
+  const b1=sub(mul(w,Math.cos(F)),mul(Q,Math.sin(F))),b2=add(mul(w,Math.sin(F)),mul(Q,Math.cos(F)));
+  return [[b1[0],b2[0],b3[0]],[b1[1],b2[1],b3[1]],[b1[2],b2[2],b3[2]]];}
+function pointingTorque(r,v,a,C){                      // Eq.(52)-(95): tau_p = J alpha + w x J w   (body frame)
+  const u=mul(r,-1),ud=mul(v,-1),udd=mul(a,-1),n=nrm(u),d=mul(u,1/n);
+  const P=(x)=>sub(x,mul(d,dot(d,x)));const dd=mul(P(ud),1/n);
+  const ddd=mul(sub(P(udd),add(mul(dd,dot(d,ud)),mul(d,dot(dd,ud)))).map((x,i)=>x),1/n);   // Eq.(66)
+  const w=cross(d,dd),al=cross(d,ddd),CT=mT(C),wb=mv(CT,w),ab=mv(CT,al);
+  return add(mv(JB,ab),cross(wb,mv(JB,wb)));}
+/* ---------- stage 3: pointing + allocation along the stage-2 burns; the DELIVERED thrust is re-propagated ---------- */
+function simulate(p,r0,v0,m0,cfg,opt={}){
+  const psi=opt.psi??90,phi=opt.phi??0,lam=opt.lam??1e-6,nseg=opt.nseg??40,isp=316;
+  const [s0,s1,s2]=bcb(p,r0,v0,m0,isp),T0=[p[1],p[2]],Tf=[p[5],p[6]],t1=p[0],tc=p[3],t3=p[4];
+  const C0=initialAttitude(r0,mul(T0,1/nrm(T0)),psi,phi),th0=Math.atan2(r0[1],r0[0]),sB=sBody(psi,phi);
+  let state=s0.slice(),rows=[],traj=[],z=[0,0];const path=[{t:0,x:s0[0],y:s0[1],k:0}];
+  [[s0,T0,t1,0,0],[s2,Tf,t3,t1+tc,1]].forEach(([sStart,Tcmd,dur,tstart,k])=>{
+    if(k===1){const nc=60;for(let c=0;c<nc;c++){state=rk4((t,s)=>gravT(s,z,isp),state,0,tc/nc,5.0);path.push({t:t1+(c+1)*tc/nc,x:state[0],y:state[1],k:1});}}
+    const nodes=[],h=dur/nseg;let sid=sStart.slice();
+    for(let j=0;j<=nseg;j++){
+      if(j>0)sid=rk4((t,s)=>gravT(s,Tcmd,isp),sid,0,h,1.0);
+      const r=[sid[0],sid[1],0],v=[sid[2],sid[3],0],m=sid[4],rn=nrm(r),a=[-MU*r[0]/rn**3+Tcmd[0]/m/1e3,-MU*r[1]/rn**3+Tcmd[1]/m/1e3,0];
+      const C=mm(Rz(Math.atan2(r[1],r[0])-th0),C0),Tb=mv(mT(C),[Tcmd[0],Tcmd[1],0]);
+      const u=allocate(Tb,cfg,lam),Tnb=forceOf(u),Tn=mv(C,Tnb),tauth=torqueOf(u),taup=pointingTorque(r,v,a,C),taurw=sub(taup,tauth);
+      const sumT=u.reduce((x,y)=>x+y,0),perr=Math.acos(Math.max(-1,Math.min(1,dot(mv(C,sB),mul(r,-1/rn)))))/DEG;
+      nodes.push({t:tstart+j*h,k,u,beta:u.map((x,i)=>x/TMAX[i]),Tb,Tnb,Tn:[Tn[0],Tn[1]],taurw,taup,tauth,sumT,
+        waste:(sumT-nrm(Tnb))/Math.max(nrm(Tnb),1e-12)*100,short:nrm(sub(Tnb,Tb))/nrm(Tb)*100,perr,mdot:u.reduce((x,y,i)=>x+y/ISP[i],0)/G0,r:[r[0],r[1]],m});}
+    for(let j=0;j<nseg;j++){const A=nodes[j],B=nodes[j+1];
+      const f=(t,s)=>{const w=t/h,Tt=[A.Tn[0]+(B.Tn[0]-A.Tn[0])*w,A.Tn[1]+(B.Tn[1]-A.Tn[1])*w],md=A.mdot+(B.mdot-A.mdot)*w,rn=Math.hypot(s[0],s[1]);
+        return [s[2],s[3],-MU*s[0]/rn**3+Tt[0]/s[4]/1e3,-MU*s[1]/rn**3+Tt[1]/s[4]/1e3,-md,Math.hypot(Tt[0],Tt[1])/s[4]];};
+      traj.push([state[0],state[1]]);state=rk4(f,state,0,h,Math.max(h/3,0.5));path.push({t:tstart+(j+1)*h,x:state[0],y:state[1],k:k?2:0});}
+    traj.push([state[0],state[1]]);rows.push(...nodes);});
+  return {state,fuel:m0-state[4],dv:state[5],rows,traj,path,C0,th0,sB,t1,tc,t3};}
+function idealPath(p,r0,v0,m0,isp=316){const out=[{t:0,x:r0[0],y:r0[1],k:0}],z=[0,0];let s=[r0[0],r0[1],v0[0],v0[1],m0,0],t=0;
+  [[[p[1],p[2]],p[0],0,40],[z,p[3],1,60],[[p[5],p[6]],p[4],2,40]].forEach(([T,dur,k,n])=>{for(let i=0;i<n;i++){s=rk4((tt,x)=>gravT(x,T,isp),s,0,dur/n,k===1?5:1);t+=dur/n;out.push({t,x:s[0],y:s[1],k});}});return out;}
+function lambertPath(r0,v0,tof,n=120){let s=[r0[0],r0[1],v0[0],v0[1],1,0];const out=[[s[0],s[1]]];for(let i=0;i<n;i++){s=rk4((t,x)=>gravT(x,[0,0],316),s,0,tof/n,5);out.push([s[0],s[1]]);}return out;}
+/* ---------- summary metrics + constraint checks for one allocation run ---------- */
+function summarize(S,rf,vf,tauMax){
+  const R=S.rows,tau=R.map(n=>n.taurw),peakC=Math.max(...tau.map(t=>Math.max(...t.map(Math.abs)))),peakN=Math.max(...tau.map(nrm));
+  const w=R.map(n=>n.waste),sh=R.map(n=>n.short);
+  return {fuel:S.fuel,dv:S.dv,missR:Math.hypot(S.state[0]-rf[0],S.state[1]-rf[1]),missV:Math.hypot(S.state[2]-vf[0],S.state[3]-vf[1])*1e3,
+    tauPeak:peakC,tauPeakNorm:peakN,wasteMean:w.reduce((a,b)=>a+b,0)/w.length,wasteMax:Math.max(...w),shortMax:Math.max(...sh),
+    shortMean:sh.reduce((a,b)=>a+b,0)/sh.length,perrMax:Math.max(...R.map(n=>n.perr)),tauOK:peakC<=tauMax,
+    saturated:R.reduce((c,n)=>c+n.beta.filter(b=>b>0.9999).length,0)/R.length};}
+if(typeof module!=='undefined')module.exports={MU,RE,G0,DEG,POS,DIR,TMAX,ISP,NAMES,JB,CFGS,hohmann,lambert,rk4,bcb,finiteBurn,bqp,allocate,forceOf,torqueOf,maxForward,maxAlong,
+  initialAttitude,pointingTorque,simulate,summarize,idealPath,lambertPath,sBody,nrm,sub,add,mul,dot,cross,Rz,mm,mT,mv};
+
+return module.exports;})();
+</script>
+<script>
+const E=E_ENG,$=id=>document.getElementById(id);
+const C1="#0072B2",C2="#D55E00",C3="#009E73",C4="#CC79A7",INK="#1c2733",MUTE="#66758a",RED="#b00020";
+const fmt=(x,d=2)=>Number.isFinite(x)?x.toFixed(d):"–";
+const CAP={"LVA+ACS":E.maxForward("LVA+ACS"),"ACS":E.maxForward("ACS")};
+const CAPX={};for(const c of ["LVA+ACS","ACS"])CAPX[c]={xp:E.maxAlong(c,[1,0,0]),xn:E.maxAlong(c,[-1,0,0]),yp:E.maxAlong(c,[0,1,0]),yn:E.maxAlong(c,[0,-1,0])};
+const PAPER_P=[88.21,119.81,667.0,2819.42,85.04,-58.06,-667.0];       // P* printed in the paper (Sec. V.A): t1,T0x,T0y,tc,t3,Tfx,Tfy
+const ST={R:null,tab:"A",otab:"all",sw:{tof:null,psi:null},view:{cx:0,cy:0,k:1},playing:false,raf:0,timer:0};
+/* ---------- inputs ---------- */
+function P(){return {r1:+$("r1").value,r2:+$("r2").value,ratio:+$("tofr").value,m0:+$("m0").value,psi:+$("psi").value,phi:+$("phi").value,bmode:$("bmode").value,
+  bLVA:+$("bLVA").value,bACS:+$("bACS").value,tau:+$("tau").value,lam:+$("lam").value,tolR:+$("tolr").value,tolV:+$("tolv").value,tolS:+$("tols").value};}
+const boundFor=(cfg,p)=>p.bmode==="cap"?CAP[cfg]:p.bmode==="paper"?(cfg==="ACS"?22:667):(cfg==="ACS"?p.bACS:p.bLVA);
+function syncBounds(){const m=$("bmode").value;if(m==="cap"){$("bLVA").value=CAP["LVA+ACS"].toFixed(1);$("bACS").value=CAP["ACS"].toFixed(1);}
+  if(m==="paper"){$("bLVA").value=667;$("bACS").value=22;}$("bLVA").disabled=$("bACS").disabled=m!=="custom";}
+/* ---------- compute ---------- */
+function makeChecks(c,R){const S=c.S,M=c.M,p=c.st2.p,P=R.P,minR=Math.min(...S.path.map(q=>Math.hypot(q.x,q.y)));
+  const over=S.rows.filter(n=>Math.max(...n.taurw.map(Math.abs))>P.tau).length/S.rows.length;
+  return [{ok:c.st2.ok&&p[0]+p[4]<=R.tof,t:"Finite burn exists and fits in the TOF",d:`burns ${fmt(p[0]/60)} + ${fmt(p[4]/60)} min of ${fmt(R.tof/60)} min`},
+   {ok:M.perrMax<1e-3,t:"Strict pointing (error ≤ 0.001°)",d:`max ${M.perrMax.toExponential(1)}°`},
+   {ok:true,t:"0 ≤ β ≤ 1 (by construction)",d:`${fmt(M.saturated,1)} thrusters saturated on average`},
+   {ok:M.shortMax<=P.tolS,t:`Thrust delivered (shortfall ≤ ${P.tolS}%)`,d:`max ${fmt(M.shortMax)}%, mean ${fmt(M.shortMean)}%`},
+   {ok:M.tauPeak<=P.tau,t:`Wheel torque ≤ ${P.tau} N·m`,d:`peak ${fmt(M.tauPeak,4)} N·m; ${fmt(100*over,0)}% of burn nodes over`},
+   {ok:M.missR<=P.tolR&&M.missV<=P.tolV,t:"Arrival within tolerance",d:`${fmt(M.missR,3)} km, ${fmt(M.missV,3)} m/s`},
+   {ok:minR>=E.RE+200,t:"Altitude ≥ 200 km",d:`min ${fmt(minR-E.RE,0)} km`},
+   {ok:S.fuel<=599.4,t:"Propellant ≤ 599.4 kg",d:`${fmt(S.fuel)} kg`}];}
+function computeAll(p){
+  const h=E.hohmann(p.r1,p.r2,p.m0),tof=p.ratio*h.tof,r0=[p.r1,0],v0=[0,h.v1],rf=[-p.r2,0],vf=[0,-h.v2];
+  const lam=E.lambert([p.r1,0,0],[-p.r2,0,0],tof),R={P:p,h,tof,r0,v0,rf,vf,lam,cfg:{}};
+  if(lam){R.dv1=[(lam.v1[0]-v0[0])*1e3,(lam.v1[1]-v0[1])*1e3];R.dv2=[(vf[0]-lam.v2[0])*1e3,(vf[1]-lam.v2[1])*1e3];R.lamPath=E.lambertPath(r0,lam.v1.slice(0,2),tof);
+    R.lamDv=Math.hypot(...R.dv1)+Math.hypot(...R.dv2);}
+  R.hohPath=E.lambertPath(r0,[0,h.vp],h.tof);
+  for(const [key,name] of [["A","LVA+ACS"],["B","ACS"]]){
+    const Tm=boundFor(name,p),t0=performance.now(),st2=E.finiteBurn(r0,v0,rf,vf,p.m0,tof,Tm),c={key,name,Tmax:Tm,st2,ms2:performance.now()-t0};
+    if(st2.ok){const t1=performance.now();c.S=E.simulate(st2.p,r0,v0,p.m0,name,{psi:p.psi,phi:p.phi,lam:p.lam,nseg:40});c.M=E.summarize(c.S,rf,vf,p.tau);c.ms3=performance.now()-t1;
+      c.ideal=E.idealPath(st2.p,r0,v0,p.m0);c.checks=makeChecks(c,R);c.ok=c.checks.every(q=>q.ok);}
+    R.cfg[key]=c;}
+  // the paper's printed P* through this tool's allocation (default example only)
+  if(p.r1===7000&&p.r2===7250&&Math.abs(p.ratio-1)<1e-9){R.paperP={};for(const [key,name] of [["A","LVA+ACS"],["B","ACS"]]){const S=E.simulate(PAPER_P,r0,v0,p.m0,name,{psi:p.psi,phi:p.phi,lam:p.lam,nseg:40});R.paperP[key]={S,M:E.summarize(S,rf,vf,p.tau)};}}
+  return R;}
+/* ---------- canvas helpers ---------- */
+function fit(cv){const d=window.devicePixelRatio||1,w=cv.clientWidth,h=cv.clientHeight;if(!w||!h)return null;cv.width=Math.round(w*d);cv.height=Math.round(h*d);
+  const c=cv.getContext("2d");c.setTransform(d,0,0,d,0,0);c.clearRect(0,0,w,h);c.font="11.5px system-ui,sans-serif";return {c,w,h};}
+function niceTicks(a,b,n=6){const span=b-a;if(!(span>0))return [a];const raw=span/n,p=Math.pow(10,Math.floor(Math.log10(raw))),f=raw/p,step=(f<1.5?1:f<3?2:f<7?5:10)*p,o=[];
+  for(let v=Math.ceil(a/step-1e-9)*step;v<=b+1e-9*step;v+=step)o.push(+v.toPrecision(12));return o;}
+function tfmt(v){const a=Math.abs(v);return a>=1e4||(a<1e-2&&a>0)?v.toExponential(0):(+v.toPrecision(4)).toString();}
+/* generic x-y plot; opts: xlim,ylim,xlabel,ylabel,series[{x,y,c,w,dash,pts}],hlines[{y,c,dash}],vlines[{x,c,dash}],ylog,y2:{ylim,label,series} */
+function plot(cv,o){const F=fit(cv);if(!F)return;const {c,w,h}=F,L=50,Rm=o.y2?44:10,T=8,B=30,pw=w-L-Rm,ph=h-T-B;
+  const [x0,x1]=o.xlim;let [y0,y1]=o.ylim;const ly=o.ylog,fy=v=>ly?Math.log10(Math.max(v,1e-12)):v;if(ly){y0=Math.log10(y0);y1=Math.log10(y1);}
+  const X=v=>L+(v-x0)/(x1-x0||1)*pw,Y=v=>T+ph-(fy(v)-y0)/(y1-y0||1)*ph;
+  c.strokeStyle="#e5e9ee";c.fillStyle=MUTE;c.lineWidth=1;c.textAlign="right";c.textBaseline="middle";
+  if(ly){for(let e=Math.ceil(y0);e<=y1;e++){const yy=T+ph-(e-y0)/(y1-y0)*ph;c.beginPath();c.moveTo(L,yy);c.lineTo(L+pw,yy);c.stroke();c.fillText("1e"+e,L-4,yy);}}
+  else for(const v of niceTicks(y0,y1)){const yy=Y(v);c.beginPath();c.moveTo(L,yy);c.lineTo(L+pw,yy);c.stroke();c.fillText(tfmt(v),L-4,yy);}
+  c.textAlign="center";c.textBaseline="top";for(const v of niceTicks(x0,x1)){const xx=X(v);c.beginPath();c.moveTo(xx,T);c.lineTo(xx,T+ph);c.stroke();c.fillText(tfmt(v),xx,T+ph+3);}
+  c.strokeStyle="#9aa5b1";c.strokeRect(L,T,pw,ph);c.fillStyle=MUTE;c.textAlign="center";c.fillText(o.xlabel||"",L+pw/2,h-13);
+  c.save();c.translate(11,T+ph/2);c.rotate(-Math.PI/2);c.fillText(o.ylabel||"",0,0);c.restore();
+  c.save();c.beginPath();c.rect(L,T,pw,ph);c.clip();
+  (o.shade||[]).forEach(s=>{c.fillStyle=s.c;c.fillRect(X(s.x0),T,X(s.x1)-X(s.x0),ph);});
+  (o.hlines||[]).forEach(l=>{c.strokeStyle=l.c;c.lineWidth=1.2;c.setLineDash(l.dash||[5,4]);c.beginPath();c.moveTo(L,Y(l.y));c.lineTo(L+pw,Y(l.y));c.stroke();});
+  (o.vlines||[]).forEach(l=>{c.strokeStyle=l.c;c.lineWidth=1.2;c.setLineDash(l.dash||[5,4]);c.beginPath();c.moveTo(X(l.x),T);c.lineTo(X(l.x),T+ph);c.stroke();});c.setLineDash([]);
+  const draw=(s,YY)=>{c.strokeStyle=s.c;c.fillStyle=s.c;c.lineWidth=s.w||1.8;c.setLineDash(s.dash||[]);c.beginPath();let pen=false;
+    s.x.forEach((xv,i)=>{const yv=s.y[i];if(!Number.isFinite(yv)){pen=false;return;}const px=X(xv),py=YY(yv);if(!pen){c.moveTo(px,py);pen=true;}else c.lineTo(px,py);});c.stroke();c.setLineDash([]);
+    if(s.pts)s.x.forEach((xv,i)=>{if(Number.isFinite(s.y[i])){c.beginPath();c.arc(X(xv),YY(s.y[i]),2.6,0,7);c.fill();}});
+    (s.marks||[]).forEach(m=>{c.strokeStyle=s.c;c.lineWidth=2;const px=X(m.x),py=T+8;c.beginPath();c.moveTo(px-4,py-4);c.lineTo(px+4,py+4);c.moveTo(px+4,py-4);c.lineTo(px-4,py+4);c.stroke();});};
+  (o.series||[]).forEach(s=>draw(s,Y));
+  if(o.y2){const [a,b]=o.y2.ylim,Y2=v=>T+ph-(v-a)/(b-a||1)*ph;(o.y2.series||[]).forEach(s=>draw(s,Y2));}
+  c.restore();
+  if(o.y2){const [a,b]=o.y2.ylim;c.fillStyle=MUTE;c.textAlign="left";c.textBaseline="middle";for(const v of niceTicks(a,b,5)){c.fillText(tfmt(v),L+pw+4,T+ph-(v-a)/(b-a||1)*ph);}
+    c.save();c.translate(w-6,T+ph/2);c.rotate(Math.PI/2);c.textAlign="center";c.fillText(o.y2.label||"",0,0);c.restore();}}
+/* ---------- results table ---------- */
+const td=(x,cls)=>`<td${cls?` class="${cls}"`:""}>${x}</td>`;
+function statusCell(c){if(!c.st2.ok)return `<span class="bad">no finite burn: ${c.st2.why}</span>`;return c.ok?`<span class="ok">passes all checks</span>`:`<span class="bad">fails: ${c.checks.filter(q=>!q.ok).map(q=>q.t.split(" (")[0].toLowerCase()).join("; ")}</span>`;}
+function renderTable(R){const P0=R.P,rows=[];
+  rows.push(`<tr><td>Hohmann (impulsive)</td>${td(fmt(R.h.fuel,3))}${td(fmt(R.h.dv,3))}${td("impulsive")}${td("impulsive")}${td("–")}${td("–")}${td("–")}${td("–")}${td("closed form")}${td("reference")}</tr>`);
+  if(R.lam&&Math.abs(R.tof-R.h.tof)>0.5)rows.push(`<tr><td>Lambert at TOF = ${fmt(R.tof,1)} s (impulsive)</td>${td(fmt(P0.m0*(1-Math.exp(-R.lamDv/(316*E.G0))),3))}${td(fmt(R.lamDv,3))}${td("impulsive")}${td("impulsive")}${td("–")}${td("–")}${td("–")}${td("–")}${td("closed form")}${td(R.lamDv>R.h.dv?`+${fmt(R.lamDv-R.h.dv,1)} m/s vs Hohmann`:"")}</tr>`);
+  for(const k of ["A","B"]){const c=R.cfg[k],st=c.st2;
+    rows.push(`<tr class="sub"><td>Finite burn · T<sub>max</sub> = ${fmt(c.Tmax,1)} N (bound for ${c.name})</td>${st.ok?td(fmt(st.fuel,3))+td(fmt(st.dv,3))+td(fmt(st.p[0]/60,2))+td(fmt(st.p[4]/60,2))+td("–")+td("–")+td("–")+td(`${fmt(st.err_r,4)} km, ${fmt(st.err_v,4)} m/s`)+td(`${st.iters} Newton it., ${fmt(c.ms2,0)} ms`)+td(`<span class="ok">converged</span>`):`<td colspan="9" class="bad" style="text-align:left">${st.why}</td>`}${st.ok?"":""}</tr>`);
+    if(st.ok){const M=c.M;rows.push(`<tr class="alloc"><td>↳ ${c.name} allocation</td>${td(fmt(M.fuel,3))}${td(fmt(M.dv,3))}${td(fmt(c.st2.p[0]/60,2))}${td(fmt(c.st2.p[4]/60,2))}${td(fmt(M.wasteMean,2)+" / "+fmt(M.wasteMax,2))}${td(fmt(M.shortMax,2),M.shortMax>P0.tolS?"bad":"")}${td(fmt(M.tauPeak,4),M.tauPeak>P0.tau?"bad":"")}${td(`${fmt(M.missR,3)} km, ${fmt(M.missV,3)} m/s`,M.missR>P0.tolR?"bad":"")}${td(`${fmt(c.ms3,0)} ms`)}${td(statusCell(c))}</tr>`);}}
+  if(R.paperP){const pp=R.paperP;rows.push(`<tr class="sub"><td colspan="11" style="text-align:left;color:#555">Paper&rsquo;s printed P* (burns 88.21 s / 85.04 s, T<sub>0</sub> = (119.81, 667), T<sub>f</sub> = (&minus;58.06, &minus;667) N) pushed through this tool&rsquo;s allocation:</td></tr>`);
+    for(const k of ["A","B"]){const M=pp[k].M;rows.push(`<tr class="alloc"><td>↳ ${R.cfg[k].name} allocation of P*</td>${td(fmt(M.fuel,3))}${td(fmt(M.dv,3))}${td("1.47")}${td("1.42")}${td(fmt(M.wasteMean,2)+" / "+fmt(M.wasteMax,2))}${td(fmt(M.shortMax,2))}${td(fmt(M.tauPeak,4))}${td(`${fmt(M.missR,1)} km, ${fmt(M.missV,1)} m/s`)}${td("–")}${td("")}</tr>`);}
+    rows.push(`<tr class="paper"><td>Paper, Table 4: Hohmann</td>${td("37.195")}${td("131.236")}${td("impulsive")}${td("impulsive")}${td("N/A")}${td("N/A")}${td("N/A")}${td("not reported")}${td("N/A")}${td("")}</tr>
+     <tr class="paper"><td>Paper, Table 4: finite burn</td>${td("37.694")}${td("133.032")}${td("1.49")}${td("1.42")}${td("N/A")}${td("N/A")}${td("N/A")}${td("not reported")}${td("5 it., 2.28 s")}${td("")}</tr>
+     <tr class="paper"><td>Paper, Table 4: LVA+ACS allocation</td>${td("38.014")}${td("130.971")}${td("1.49")}${td("1.42")}${td("3.38 (mean)")}${td("not reported")}${td("0.7550")}${td("not reported")}${td("")}${td("")}</tr>
+     <tr class="paper"><td>Paper, Table 4: ACS allocation</td>${td("8.0867")}${td("17.839")}${td("1.49")}${td("1.42")}${td("14.09")}${td("not reported")}${td("4.3142")}${td("not reported")}${td("")}${td("&ldquo;cannot provide the Δv&rdquo;")}</tr>`);}
+  $("tbl").innerHTML=`<table><thead><tr><th>Step</th><th>Fuel (kg)</th><th>Δv (m/s)</th><th>Burn 1 (min)</th><th>Burn 2 (min)</th><th>Wasted mean / max (%)</th><th>Shortfall max (%)</th><th>Max |τ<sub>rw</sub>| (N·m)</th><th>Arrival error</th><th>Solver</th><th>Status</th></tr></thead><tbody>${rows.join("")}</tbody></table>`;
+  {const f=(v,d)=>Number.isFinite(v)?v.toFixed(d):"–",row=(n,p,cls)=>`<tr class="${cls||""}"><td>${n}</td>${p?[p[0],p[1],p[2],0,p[3],p[4],p[5],p[6],0].map((v,i)=>`<td>${f(v,(i==0||i==4||i==5)?2:2)}</td>`).join(""):`<td colspan="9" class="bad" style="text-align:left">no solution</td>`}</tr>`;
+  $("pvec").innerHTML=`<table><thead><tr><th>Case</th><th>p<sub>1</sub> t<sub>1</sub></th><th>p<sub>2</sub> T<sub>0x</sub></th><th>p<sub>3</sub> T<sub>0y</sub></th><th>p<sub>4</sub> T<sub>0z</sub></th><th>p<sub>5</sub> t<sub>c</sub></th><th>p<sub>6</sub> t<sub>3</sub></th><th>p<sub>7</sub> T<sub>fx</sub></th><th>p<sub>8</sub> T<sub>fy</sub></th><th>p<sub>9</sub> T<sub>fz</sub></th></tr></thead><tbody>${[R.cfg.A,R.cfg.B].map(c=>row(`${c.name} (T<sub>max</sub> = ${f(c.Tmax,1)} N)`,c.st2&&c.st2.ok?c.st2.p:null)).join("")}${row("Paper P* (Sec. V.A, T<sub>max</sub> = 667 N)",PAPER_P,"paper")}</tbody></table>`;}
+  const A=R.cfg.A,B=R.cfg.B;$("verdict").innerHTML=[A,B].map(c=>`<span class="${c.ok?"ok":"bad"}">${c.name}: ${c.ok?"feasible":"infeasible"}</span>`).join(" &nbsp;·&nbsp; ");}
+/* ---------- orbit view ---------- */
+function worldToScreen(F,R){const ext=Math.max(R.P.r1,R.P.r2)*1.14,s=Math.min(F.w,F.h)/2/ext*ST.view.k;return v=>[F.w/2+(v[0]-ST.view.cx)*s,F.h/2-(v[1]-ST.view.cy)*s];}
+const pathAt=(path,t)=>{let i=0;while(i<path.length-2&&path[i+1].t<t)i++;const a=path[i],b=path[i+1],w=b.t>a.t?Math.min(1,Math.max(0,(t-a.t)/(b.t-a.t))):0;return {x:a.x+(b.x-a.x)*w,y:a.y+(b.y-a.y)*w};};
+function drawOrbit(){const R=ST.R,cv=$("cvOrbit"),F=fit(cv);if(!R||!F)return;const {c}=F,W=worldToScreen(F,R),s=W([1,0])[0]-W([0,0])[0];
+  c.fillStyle="#dbe9f5";c.beginPath();c.arc(...W([0,0]),E.RE*s,0,7);c.fill();c.fillStyle=MUTE;c.textAlign="center";c.fillText("Earth",...W([0,0]));
+  for(const r of [R.P.r1,R.P.r2]){c.strokeStyle="#9aa5b1";c.lineWidth=1;c.beginPath();c.arc(...W([0,0]),r*s,0,7);c.stroke();}
+  const line=(pts,col,w,dash)=>{c.strokeStyle=col;c.lineWidth=w;c.setLineDash(dash||[]);c.beginPath();pts.forEach((p,i)=>{const q=W(p);i?c.lineTo(...q):c.moveTo(...q);});c.stroke();c.setLineDash([]);};
+  line(R.hohPath,"#7d8794",1.4,[6,5]);if(R.lamPath&&Math.abs(R.tof-R.h.tof)>0.5)line(R.lamPath,C4,1.6);
+  const ks=ST.otab==="all"?["A","B"]:[ST.otab];
+  const A=R.cfg.A;if(A.ideal){line(A.ideal.map(p=>[p.x,p.y]),INK,1.2);
+    for(const kk of [0,2]){const seg=A.ideal.filter(p=>p.k===kk||(kk===2&&p.k===1&&false));line(seg.map(p=>[p.x,p.y]),RED,3.4);}}
+  ks.forEach(k=>{const cc=R.cfg[k];if(cc.S){line(cc.S.path.map(p=>[p.x,p.y]),k==="A"?C2:C1,1.8,k==="A"?[]:[2,3]);
+    for(const kk of [0,2]){const seg=cc.S.path.filter(p=>p.k===kk);line(seg.map(p=>[p.x,p.y]),k==="A"?C2:C1,3.2);}}});
+  c.fillStyle=INK;[R.r0,R.rf].forEach((p,i)=>{const q=W(p);c.beginPath();c.arc(...q,4.5,0,7);c.fill();c.fillText(i?"burn 2 / target":"burn 1 / start",q[0],q[1]-9);});
+  // playhead: spacecraft, boresight, LVA axis, delivered thrust
+  const cc=R.cfg[ST.otab==="B"?"B":"A"];if(cc.S){const t=+$("tplay").value,q=pathAt(cc.S.path,t),sp=W([q.x,q.y]),th=Math.atan2(q.y,q.x),C=E.mm(E.Rz(th-cc.S.th0),cc.S.C0),sI=E.mv(C,cc.S.sB),bI=E.mv(C,[0,0,1]);
+    const arrow=(v,col,len)=>{const e=[sp[0]+v[0]*len,sp[1]-v[1]*len];c.strokeStyle=col;c.fillStyle=col;c.lineWidth=2;c.beginPath();c.moveTo(...sp);c.lineTo(...e);c.stroke();
+      const a=Math.atan2(-(v[1]),v[0]);c.beginPath();c.moveTo(...e);c.lineTo(e[0]-7*Math.cos(a-.4),e[1]-7*Math.sin(a-.4));c.lineTo(e[0]-7*Math.cos(a+.4),e[1]-7*Math.sin(a+.4));c.fill();};
+    arrow(sI,"#d6336c",34);arrow(bI,C3,30);const n=nearestRow(cc.S,t);if(n&&n.inBurn){const m=Math.hypot(...n.row.Tn)||1;arrow([n.row.Tn[0]/m,n.row.Tn[1]/m],"#1971c2",24);}
+    c.fillStyle=INK;c.beginPath();c.arc(...sp,4,0,7);c.fill();}}
+function nearestRow(S,t){const b1=S.t1,b2s=S.t1+S.tc;let inBurn=(t<=b1)||(t>=b2s);if(!inBurn)return {inBurn:false,phase:"coast"};
+  let best=null,bd=1e18;for(const n of S.rows){const d=Math.abs(n.t-t);if(d<bd){bd=d;best=n;}}return {inBurn:true,row:best,phase:t<=b1?"burn 1":"burn 2"};}
+$("legOrbit").innerHTML=`<span><i style="background:#7d8794"></i>Hohmann ellipse (impulsive)</span><span><i style="background:${C4}"></i>Lambert arc at the chosen TOF</span><span><i style="background:${INK}"></i>ideal finite burn (red = burns)</span><span><i style="background:${C2}"></i>delivered, LVA+ACS</span><span><i style="background:${C1}"></i>delivered, ACS only</span><span>playhead: <b style="color:#d6336c">bore-sight</b>, <b style="color:${C3}">LVA axis</b>, <b style="color:#1971c2">delivered thrust</b></span><span>wheel zooms, drag pans</span>`;
+/* ---------- arrival error ---------- */
+function drawMiss(){const R=ST.R,F=fit($("cvMiss"));if(!R||!F)return;const {c,w,h}=F,pts=[];
+  for(const k of ["A","B"]){const cc=R.cfg[k];if(cc.S)pts.push({n:cc.name+" allocation",col:k==="A"?C2:C1,e:[cc.S.state[0]-R.rf[0],cc.S.state[1]-R.rf[1]],v:cc.M.missV});}
+  const A=R.cfg.A;if(A.st2.ok){const sT=E.bcb(A.st2.p,R.r0,R.v0,R.P.m0)[3];pts.push({n:"ideal finite burn",col:INK,e:[sT[0]-R.rf[0],sT[1]-R.rf[1]],v:0});}
+  const ext=Math.max(R.P.tolR*1.6,1e-3,...pts.map(p=>Math.hypot(...p.e)))*1.25,cx=w/2,cy=h/2,s=Math.min(w,h)/2*0.88/ext;
+  c.strokeStyle="#e5e9ee";c.fillStyle=MUTE;c.textAlign="center";
+  for(const v of niceTicks(-ext,ext,6)){c.beginPath();c.moveTo(cx+v*s,0);c.lineTo(cx+v*s,h);c.moveTo(0,cy-v*s);c.lineTo(w,cy-v*s);c.stroke();}
+  c.fillText("x error (km) →",w-60,cy-6);c.fillText("y",cx+8,12);c.strokeStyle="#9aa5b1";c.beginPath();c.moveTo(0,cy);c.lineTo(w,cy);c.moveTo(cx,0);c.lineTo(cx,h);c.stroke();
+  c.strokeStyle="#2f9e44";c.setLineDash([5,4]);c.beginPath();c.arc(cx,cy,R.P.tolR*s,0,7);c.stroke();c.setLineDash([]);c.fillStyle="#2f9e44";c.textAlign="left";c.fillText(`tolerance ${R.P.tolR} km`,cx+R.P.tolR*s*0.72+4,cy-R.P.tolR*s*0.72);
+  pts.forEach((p,i)=>{const x=cx+p.e[0]*s,y=cy-p.e[1]*s;c.fillStyle=p.col;c.beginPath();c.arc(x,y,5,0,7);c.fill();
+    c.textAlign="left";c.fillText(`● ${p.n}: ${fmt(Math.hypot(...p.e),2)} km, ${fmt(p.v,2)} m/s`,10,18+i*15);});
+  c.fillStyle=INK;c.textAlign="center";c.fillText("target",cx,cy+14);
+  const scale=niceTicks(-ext,ext,6);c.fillStyle=MUTE;c.textAlign="center";c.fillText(`grid: ${fmt(scale[1]-scale[0],ext<1?3:1)} km`,50,h-6);}
+/* ---------- Lambert panel ---------- */
+let LAMC={key:"",d:null};
+function lamData(R){const key=R.P.r1+"_"+R.P.r2;if(LAMC.key===key)return LAMC.d;const xs=[],tot=[],rad=[];
+  for(let i=0;i<=120;i++){const rt=0.94+0.12*i/120,tof=rt*R.h.tof,L=E.lambert([R.P.r1,0,0],[-R.P.r2,0,0],tof);xs.push(tof);
+    if(!L){tot.push(NaN);rad.push(NaN);continue;}const d1=[(L.v1[0]-R.v0[0])*1e3,(L.v1[1]-R.v0[1])*1e3],d2=[(R.vf[0]-L.v2[0])*1e3,(R.vf[1]-L.v2[1])*1e3];tot.push(Math.hypot(...d1)+Math.hypot(...d2));rad.push(Math.abs(d1[0]));}
+  LAMC={key,d:{xs,tot,rad}};return LAMC.d;}
+function drawLam(){const R=ST.R,cv=$("cvLam");if(!R)return;const d=lamData(R),ymax=Math.min(600,Math.max(...d.tot.filter(Number.isFinite)));
+  plot(cv,{xlim:[d.xs[0],d.xs[d.xs.length-1]],ylim:[0,ymax*1.05],xlabel:"time of flight (s)",ylabel:"impulsive Δv (m/s)",series:[{x:d.xs,y:d.tot,c:C1},{x:d.xs,y:d.rad,c:C2,dash:[4,3]}],
+    vlines:[{x:R.tof,c:"#555",dash:[]},{x:R.h.tof,c:"#bbb",dash:[3,3]}]});}
+/* ---------- sweeps ---------- */
+function invalidateSweeps(){ST.sw.tof=null;ST.sw.psi=null;$("swTofInfo").textContent="Press “Run TOF sweep” to compute the allocation pipeline across time of flight (about 3 s).";$("swPsiInfo").textContent="";drawSwTof();drawSwPsi();}
+function runTofSweep(){const R=ST.R,p=R.P,all=[];for(let r=0.94;r<=1.0601;r+=0.0025)all.push(+r.toFixed(4));const mid=all.reduce((b,r,i)=>Math.abs(r-1)<Math.abs(all[b]-1)?i:b,0);
+  const order=[];for(let k=mid;k<all.length;k++)order.push(k);for(let k=mid-1;k>=0;k--)order.push(k);                 // continuation outward from the Hohmann TOF
+  const out={ratios:all,A:{miss:[],short:[],fail:[]},B:{miss:[],short:[],fail:[]}};const guess={A:null,B:null},fails={A:0,B:0};let i=0;$("swTof").disabled=true;
+  all.forEach(()=>{for(const k of ["A","B"]){out[k].miss.push(NaN);out[k].short.push(NaN);out[k].fail.push(true);}});
+  const step=()=>{const t0=performance.now();while(i<order.length&&performance.now()-t0<30){const idx=order[i],tof=all[idx]*R.h.tof;if(idx===mid-1){guess.A=guess.B=null;fails.A=fails.B=0;}
+    for(const [k,name] of [["A","LVA+ACS"],["B","ACS"]]){if(fails[k]>=2){out[k].fail[idx]=true;continue;}let st=E.finiteBurn(R.r0,R.v0,R.rf,R.vf,p.m0,tof,boundFor(name,p),316,idx===mid-1?null:guess[k]);if(!st.ok&&guess[k])st=E.finiteBurn(R.r0,R.v0,R.rf,R.vf,p.m0,tof,boundFor(name,p));
+      if(!st.ok){out[k].fail[idx]=true;fails[k]++;continue;}fails[k]=0;guess[k]=st.z;
+      const S=E.simulate(st.p,R.r0,R.v0,p.m0,name,{psi:p.psi,phi:p.phi,lam:p.lam,nseg:24}),M=E.summarize(S,R.rf,R.vf,p.tau);out[k].miss[idx]=M.missR;out[k].short[idx]=M.shortMax;out[k].fail[idx]=false;}
+    i++;}
+    $("swTofInfo").textContent=`sweeping… ${Math.round(100*i/order.length)}%`;
+    if(i<order.length)setTimeout(step,0);else{ST.sw.tof=out;$("swTof").disabled=false;drawSwTof();}};setTimeout(step,0);}
+function windowText(o,tolR,h){const ok=o.ratios.filter((r,i)=>!o.A.fail[i]&&o.A.miss[i]<=tolR);return ok;}
+function drawSwTof(){const R=ST.R,cv=$("cvSwTof"),o=ST.sw.tof;if(!R)return;
+  if(!o){plot(cv,{xlim:[0.94*R.h.tof,1.06*R.h.tof],ylim:[1e-3,1e4],ylog:true,xlabel:"time of flight (s)",ylabel:"arrival error (km)",series:[],hlines:[{y:R.P.tolR,c:"#2f9e44"}],vlines:[{x:R.tof,c:"#555",dash:[]}]});return;}
+  const xs=o.ratios.map(r=>r*R.h.tof),clip=a=>a.map(v=>Number.isFinite(v)?Math.max(v,1.5e-3):NaN);
+  plot(cv,{xlim:[xs[0],xs[xs.length-1]],ylim:[1e-3,1e4],ylog:true,xlabel:"time of flight (s)",ylabel:"arrival error (km)",hlines:[{y:R.P.tolR,c:"#2f9e44"}],vlines:[{x:R.tof,c:"#555",dash:[]},{x:R.h.tof,c:"#bbb",dash:[3,3]}],
+    series:[{x:xs,y:clip(o.A.miss),c:C2,pts:true,marks:xs.filter((x,i)=>o.A.fail[i]).map(x=>({x}))},{x:xs,y:clip(o.B.miss),c:C1,pts:true,marks:xs.filter((x,i)=>o.B.fail[i]).map(x=>({x}))}]});
+  const win=(k)=>{const g=o.ratios.filter((r,i)=>!o[k].fail[i]&&o[k].miss[i]<=R.P.tolR);return g.length?`${fmt(g[0]*R.h.tof,0)}–${fmt(g[g.length-1]*R.h.tof,0)} s`:"never (in this range)";};
+  const fl=(k)=>{const g=o.ratios.filter((r,i)=>o[k].fail[i]);return g.length?`; no finite burn found for ${g.length} of ${o.ratios.length} TOF points`:"";};
+  $("swTofInfo").innerHTML=`Arrival within ${R.P.tolR} km: <b style="color:${C2}">LVA+ACS</b> ${win("A")}${fl("A")}; <b style="color:${C1}">ACS only</b> ${win("B")}${fl("B")}. (Sequential Approach A, bore-sight ψ=${R.P.psi}°, φ=${R.P.phi}°.)`;}
+function runPsiSweep(){const R=ST.R,p=R.P,psis=[];for(let a=0;a<=180;a+=5)psis.push(a);const out={psis,A:{miss:[],short:[]},B:{miss:[],short:[]}};let i=0;$("swPsi").disabled=true;
+  const step=()=>{const t0=performance.now();while(i<psis.length&&performance.now()-t0<30){for(const k of ["A","B"]){const c=R.cfg[k];if(!c.st2.ok){out[k].miss.push(NaN);out[k].short.push(NaN);continue;}
+    const S=E.simulate(c.st2.p,R.r0,R.v0,p.m0,c.name,{psi:psis[i],phi:p.phi,lam:p.lam,nseg:24}),M=E.summarize(S,R.rf,R.vf,p.tau);out[k].miss.push(M.missR);out[k].short.push(M.shortMax);}i++;}
+    $("swPsiInfo").textContent=`sweeping… ${Math.round(100*i/psis.length)}%`;
+    if(i<psis.length)setTimeout(step,0);else{ST.sw.psi=out;$("swPsi").disabled=false;drawSwPsi();}};setTimeout(step,0);}
+function drawSwPsi(){const R=ST.R,cv=$("cvSwPsi"),o=ST.sw.psi;if(!R)return;
+  if(!o){plot(cv,{xlim:[0,180],ylim:[1e-2,1e4],ylog:true,xlabel:"ψ (deg): angle between the bore-sight and the LVA axis",ylabel:"arrival error (km)",series:[],vlines:[{x:R.P.psi,c:"#555",dash:[]}],hlines:[{y:R.P.tolR,c:"#2f9e44"}]});return;}
+  const cl=a=>a.map(v=>Number.isFinite(v)?Math.max(v,1.2e-2):NaN);
+  plot(cv,{xlim:[0,180],ylim:[1e-2,1e4],ylog:true,xlabel:"ψ (deg): angle between the bore-sight and the LVA axis",ylabel:"arrival error (km)",vlines:[{x:R.P.psi,c:"#555",dash:[]},{x:90,c:"#ccc",dash:[3,3]}],hlines:[{y:R.P.tolR,c:"#2f9e44"}],
+    series:[{x:o.psis,y:cl(o.A.miss),c:C2,pts:true},{x:o.psis,y:cl(o.B.miss),c:C1,pts:true}],
+    y2:{ylim:[0,100],label:"max shortfall (%)",series:[{x:o.psis,y:o.A.short.map(v=>Math.min(v,100)),c:C2,dash:[2,3],w:1.4},{x:o.psis,y:o.B.short.map(v=>Math.min(v,100)),c:C1,dash:[2,3],w:1.4}]}});
+  const best=(k)=>{let b=-1,m=1e18;o.psis.forEach((a,i)=>{if(Number.isFinite(o[k].miss[i])&&o[k].miss[i]<m){m=o[k].miss[i];b=a;}});return b<0?"–":`ψ=${b}° (${fmt(m,2)} km)`;};
+  $("swPsiInfo").innerHTML=`Best arrival error over ψ: <b style="color:${C2}">LVA+ACS</b> ${best("A")}; <b style="color:${C1}">ACS only</b> ${best("B")}. Stage 2 (the finite burn) is the same for every ψ, because the sequential approach does not know the attitude.`;}
+/* ---------- allocation panels ---------- */
+const cur=()=>ST.R&&ST.R.cfg[ST.tab];
+function xB(S,n){const g=0.12*(S.t1+S.t3);return n.k?n.t-S.tc+g:n.t;}
+function drawAlloc(){const R=ST.R,c=cur();if(!R)return;const cvs=["cvBeta","cvBars","cvFz","cvFx","cvTau","cvWs"];
+  if(!c||!c.S){cvs.forEach(id=>{const F=fit($(id));if(F){F.c.fillStyle=RED;F.c.fillText("no finite burn exists for this configuration at this TOF (see the table)",12,24);}});
+    $("chk").innerHTML=c?`<div><span class="bad">✗</span> ${c.st2.why}</div>`:"";return;}
+  const S=c.S,rows=S.rows,tx=rows.map(n=>xB(S,n)),xmax=Math.max(...tx),P0=R.P;
+  $("chk").innerHTML=c.checks.map(q=>`<div><span class="${q.ok?"ok":"bad"}">${q.ok?"✓":"✗"}</span> ${q.t}: <span style="color:${MUTE}">${q.d}</span></div>`).join("")+`<div style="grid-column:1/-1"><b class="${c.ok?"ok":"bad"}">Overall: ${c.ok?"feasible under the sequential approach":"not feasible under the sequential approach"}</b></div>`;
+  // beta heat map
+  let F=fit($("cvBeta"));if(F){const {c:g,w,h}=F,L=44,T=6,B=20,pw=w-L-6,ph=h-T-B,nr=17,rh=ph/nr,x=v=>L+v/xmax*pw,n1=rows.filter(n=>!n.k).length;
+    rows.forEach((n,j)=>{const x0=x(tx[j]),wd=Math.max(2,pw/rows.length*(n.k?1:1));n.beta.forEach((b,i)=>{g.fillStyle=b>0.9999?C2:`rgb(${Math.round(255-255*b*(1-0.0))},${Math.round(255-(255-114)*b)},${Math.round(255-(255-178)*b)})`;if(b<1e-4)g.fillStyle="#fff";g.fillRect(x0,T+i*rh,wd+0.5,rh+0.3);});});
+    g.strokeStyle="#e5e9ee";g.fillStyle=MUTE;g.textAlign="right";g.textBaseline="middle";E.NAMES.forEach((nm,i)=>{g.beginPath();g.moveTo(L,T+i*rh);g.lineTo(L+pw,T+i*rh);g.stroke();g.fillText(nm,L-4,T+(i+.5)*rh);});
+    g.strokeStyle="#9aa5b1";g.strokeRect(L,T,pw,ph);const xs=x(S.t1);g.setLineDash([4,3]);g.strokeStyle="#555";g.beginPath();g.moveTo(xs,T);g.lineTo(xs,T+ph);g.moveTo(x(S.t1+0.12*(S.t1+S.t3)),T);g.lineTo(x(S.t1+0.12*(S.t1+S.t3)),T+ph);g.stroke();g.setLineDash([]);
+    g.textAlign="center";g.textBaseline="top";g.fillText(`burn 1 (${fmt(S.t1/60,2)} min)`,L+pw*0.25,T+ph+4);g.fillText(`burn 2 (${fmt(S.t3/60,2)} min)`,L+pw*0.75,T+ph+4);}
+  // force components
+  const Tb=rows.map(n=>n.Tb),Tn=rows.map(n=>n.Tnb);
+  plot($("cvFz"),{xlim:[0,xmax],ylim:[Math.min(0,...Tb.map(v=>v[2]),...Tn.map(v=>v[2]))*1.05,Math.max(...Tb.map(v=>v[2]),...Tn.map(v=>v[2]))*1.08],xlabel:"burn time (s, coast removed)",ylabel:"force along b3 (N)",
+    series:[{x:tx,y:Tb.map(v=>v[2]),c:INK},{x:tx,y:Tn.map(v=>v[2]),c:C2,dash:[5,3]}],vlines:[{x:S.t1,c:"#999"}]});
+  const cx=CAPX[c.name],lat=[...Tb.map(v=>v[0]),...Tb.map(v=>v[1]),...Tn.map(v=>v[0]),cx.xp,-cx.xn,cx.yp,-cx.yn];
+  plot($("cvFx"),{xlim:[0,xmax],ylim:[Math.min(...lat,0)*1.15-0.5,Math.max(...lat,0)*1.15+0.5],xlabel:"burn time (s, coast removed)",ylabel:"lateral force (N)",
+    series:[{x:tx,y:Tb.map(v=>v[0]),c:INK},{x:tx,y:Tn.map(v=>v[0]),c:C2,dash:[5,3]},{x:tx,y:Tb.map(v=>v[1]),c:C1}],
+    hlines:[{y:cx.xp,c:"#999",dash:[2,3]},{y:-cx.xn,c:"#999",dash:[2,3]},{y:cx.yp,c:"#bbb",dash:[2,3]},{y:-cx.yn,c:"#bbb",dash:[2,3]}],vlines:[{x:S.t1,c:"#999"}]});
+  const tm=Math.max(P0.tau,...rows.map(n=>Math.max(...n.taurw.map(Math.abs))))*1.15;
+  plot($("cvTau"),{xlim:[0,xmax],ylim:[-tm,tm],xlabel:"burn time (s, coast removed)",ylabel:"wheel torque (N·m)",series:[0,1,2].map(i=>({x:tx,y:rows.map(n=>n.taurw[i]),c:[C2,C1,C3][i]})),
+    hlines:[{y:P0.tau,c:RED},{y:-P0.tau,c:RED}],vlines:[{x:S.t1,c:"#999"}]});
+  const wm=Math.max(...rows.map(n=>Math.max(n.waste,n.short)),1)*1.1;
+  plot($("cvWs"),{xlim:[0,xmax],ylim:[0,wm],xlabel:"burn time (s, coast removed)",ylabel:"percent",series:[{x:tx,y:rows.map(n=>n.waste),c:C2},{x:tx,y:rows.map(n=>n.short),c:C1}],vlines:[{x:S.t1,c:"#999"}]});
+  drawBars();}
+function drawBars(){const c=cur(),F=fit($("cvBars"));if(!c||!c.S||!F)return;const S=c.S,t=+$("tplay").value,nr=nearestRow(S,t),{c:g,w,h}=F,L=10,T=8,B=34,pw=w-L-6,ph=h-T-B,bw=pw/17;
+  const beta=nr.inBurn?nr.row.beta:new Array(17).fill(0);g.strokeStyle="#9aa5b1";g.strokeRect(L,T,pw,ph);
+  beta.forEach((b,i)=>{g.fillStyle=b>0.9999?C2:C1;g.fillRect(L+i*bw+2,T+ph*(1-b),bw-4,ph*b);g.fillStyle=MUTE;g.textAlign="center";g.fillText(E.NAMES[i],L+(i+.5)*bw,h-18);if(c.name==="ACS"&&i===0){g.fillText("off",L+bw/2,T+ph-4);}});
+  g.fillStyle=MUTE;g.textAlign="left";g.fillText("β = 1",L+2,T+10);
+  const row=nr.row;$("readout").innerHTML=`t = ${fmt(t,1)} s (${nr.phase}). ${nr.inBurn?`Commanded (body) = (${row.Tb.map(v=>fmt(v,1)).join(", ")}) N; delivered = (${row.Tnb.map(v=>fmt(v,1)).join(", ")}) N; shortfall ${fmt(row.short,2)}%, wasted ${fmt(row.waste,2)}%; wheel torque (${row.taurw.map(v=>fmt(v,3)).join(", ")}) N·m; ${beta.filter(b=>b>0.9999).length} saturated, ${beta.filter(b=>b>0.001).length} on.`:"Coast: no thrust; the wheels only track the line of sight."}`;}
+/* ---------- misc info + wiring ---------- */
+function updateInfo(R){const p=R.P,h=R.h;$("r1v").textContent=p.r1;$("r2v").textContent=p.r2;$("tofrv").textContent=fmt(R.tof,1)+" s";$("psiv").textContent=p.psi+"°";$("phiv").textContent=p.phi+"°";
+  const minAlt=Math.min(p.r1,p.r2)-E.RE;$("hinfo").innerHTML=`T<sub>H</sub> = ${fmt(h.tof/60,2)} min (${fmt(h.tof,1)} s) · Hohmann Δv = ${fmt(h.dv,3)} m/s (${fmt(h.dv1*1e3,2)} + ${fmt(h.dv2*1e3,2)}) · TOF = ${fmt((p.ratio-1)*100,2)}% from Hohmann · altitudes ${fmt(p.r1-E.RE,0)} / ${fmt(p.r2-E.RE,0)} km`+(minAlt<200?` <span class="bad">below the 200 km minimum</span>`:"")+(R.lam?(Math.abs(R.tof-h.tof)>0.5?`<br>Lambert departure Δv = (${fmt(R.dv1[0],1)} radial, ${fmt(R.dv1[1],1)} tangential) m/s`:""):`<br><span class="bad">no Lambert solution at this TOF</span>`);
+  const A=R.cfg.A;if(A.S){const b3=E.mm(E.Rz(0),A.S.C0).map(r=>r[2]),T0=[A.st2.p[1],A.st2.p[2]],ang=Math.acos(Math.max(-1,Math.min(1,(b3[0]*T0[0]+b3[1]*T0[1])/Math.hypot(...T0))))*180/Math.PI;
+    $("binfo").innerHTML=`s<sup>B</sup> = (${E.sBody(p.psi,p.phi).map(v=>fmt(v,3)).join(", ")}). At burn 1 the LVA axis is <b>${fmt(ang,1)}°</b> from the commanded thrust; the allocation must supply that lateral part (≈ ${fmt(A.Tmax*Math.sin(ang*Math.PI/180),1)} N) from thrusters that can give at most ≈ ${fmt(CAPX["LVA+ACS"].xp,1)} N sideways.`;}
+  else $("binfo").textContent="";
+  $("capnote").innerHTML=`Capability = largest net force along +b₃ with zero lateral force, from the layout: <b>LVA+ACS ${fmt(CAP["LVA+ACS"],1)} N</b>, <b>ACS only ${fmt(CAP.ACS,1)} N</b> (88 N from C1–C4 plus ${fmt(CAP.ACS-88,1)} N from the canted attitude thrusters). Sideways authority (±b₁ / ±b₂): LVA+ACS ${fmt(CAPX["LVA+ACS"].xp,1)} / ${fmt(CAPX["LVA+ACS"].yp,1)} N, ACS ${fmt(CAPX.ACS.xp,1)} / ${fmt(CAPX.ACS.yp,1)} N.`;
+  $("runinfo").textContent=`Last run: finite burn ${fmt(R.cfg.A.ms2+R.cfg.B.ms2,0)} ms, allocation ${fmt((R.cfg.A.ms3||0)+(R.cfg.B.ms3||0),0)} ms.`;
+  const tp=$("tplay");tp.max=R.tof;tp.step=R.tof/600;if(+tp.value>R.tof)tp.value=R.tof;$("tplayv").textContent=`t = ${fmt(+tp.value,0)} s of ${fmt(R.tof,0)} s`;}
+function redraw(){drawOrbit();drawMiss();drawLam();drawSwTof();drawSwPsi();drawAlloc();}
+function recompute(auto=true){const p=P();if(p.r2<=p.r1&&false)return;if(Math.abs(p.r2-p.r1)<20){$("hinfo").innerHTML=`<span class="bad">r₂ must differ from r₁ by at least 20 km</span>`;return;}
+  ST.R=computeAll(p);updateInfo(ST.R);renderTable(ST.R);redraw();invalidateSweeps();clearTimeout(ST.timer);if(auto)ST.timer=setTimeout(()=>{if(ST.R&&ST.R.P===p)runPsiSweep();},350);}
+let deb=0;const sched=()=>{clearTimeout(deb);deb=setTimeout(recompute,60);};
+["r1","r2","tofr","m0","psi","phi","bmode","bLVA","bACS","tau","lam","tolr","tolv","tols"].forEach(id=>{$(id).addEventListener("input",()=>{if(id==="bmode")syncBounds();sched();});$(id).addEventListener("change",()=>{if(id==="bmode")syncBounds();sched();});});
+$("pH").onclick=()=>{$("tofr").value=1;recompute();};
+$("pPaper").onclick=()=>{$("r1").value=7000;$("r2").value=7250;$("tofr").value=1;$("m0").value=897;$("psi").value=90;$("phi").value=0;$("bmode").value="cap";syncBounds();recompute();if(/auto=tof/.test(location.search))setTimeout(runTofSweep,200);};
+$("bPaper").onclick=()=>{$("psi").value=90;$("phi").value=0;recompute();};$("bB2").onclick=()=>{$("psi").value=90;$("phi").value=90;recompute();};$("bTilt").onclick=()=>{$("psi").value=60;$("phi").value=0;recompute();};
+$("m897").onclick=()=>{$("m0").value=897;recompute();};$("m1107").onclick=()=>{$("m0").value=1107;recompute();};
+$("swTof").onclick=runTofSweep;$("swPsi").onclick=runPsiSweep;
+document.querySelectorAll("#tabsT button").forEach(b=>b.onclick=()=>{ST.otab=b.dataset.k;document.querySelectorAll("#tabsT button").forEach(x=>x.classList.toggle("on",x===b));drawOrbit();});
+document.querySelectorAll("#tabsA button").forEach(b=>b.onclick=()=>{ST.tab=b.dataset.k;document.querySelectorAll("#tabsA button").forEach(x=>x.classList.toggle("on",x===b));drawAlloc();});
+$("tplay").addEventListener("input",()=>{ST.playing=false;$("tplayv").textContent=`t = ${fmt(+$("tplay").value,0)} s of ${fmt(ST.R.tof,0)} s`;drawOrbit();drawBars();});
+$("sim").onclick=()=>{recompute(false);cancelAnimationFrame(ST.raf);const R=ST.R,tp=$("tplay");tp.value=0;ST.playing=true;let t0=null;const dur=7000;
+  const tick=ts=>{if(!ST.playing)return;if(t0===null)t0=ts;const f=Math.min(1,(ts-t0)/dur);tp.value=f*R.tof;$("tplayv").textContent=`t = ${fmt(+tp.value,0)} s of ${fmt(R.tof,0)} s`;drawOrbit();drawBars();if(f<1)ST.raf=requestAnimationFrame(tick);else ST.playing=false;};ST.raf=requestAnimationFrame(tick);setTimeout(runPsiSweep,50);};
+const ocv=$("cvOrbit");ocv.addEventListener("wheel",e=>{e.preventDefault();ST.view.k=Math.min(4000,Math.max(0.6,ST.view.k*(e.deltaY<0?1.25:0.8)));drawOrbit();},{passive:false});
+let drag=null;ocv.addEventListener("pointerdown",e=>{drag={x:e.clientX,y:e.clientY,cx:ST.view.cx,cy:ST.view.cy};ocv.setPointerCapture(e.pointerId);});
+ocv.addEventListener("pointermove",e=>{if(!drag||!ST.R)return;const ext=Math.max(ST.R.P.r1,ST.R.P.r2)*1.14,s=Math.min(ocv.clientWidth,ocv.clientHeight)/2/ext*ST.view.k;ST.view.cx=drag.cx-(e.clientX-drag.x)/s;ST.view.cy=drag.cy+(e.clientY-drag.y)/s;drawOrbit();});
+ocv.addEventListener("pointerup",()=>drag=null);ocv.addEventListener("dblclick",()=>{ST.view={cx:0,cy:0,k:1};drawOrbit();});
+window.addEventListener("resize",()=>{if(ST.R)redraw();});
+syncBounds();recompute();if(/auto=tof/.test(location.search))setTimeout(runTofSweep,200);
+
+</script>
+</body>
+</html>
