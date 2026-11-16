@@ -4,3 +4,4 @@ Interactive tutorials and applets from the Autonomous Robots and Systems Laborat
 
 - [AirDrop Bathymetry Mapping Sandbox](https://robotics-uncc.github.io/Tutorials/airdrop-bathymetry/)
 - [Thruster Allocation Tutorial](https://robotics-uncc.github.io/Tutorials/thruster-allocation/)
+- [Hohmann Finite-Burn Tutorial](https://robotics-uncc.github.io/Tutorials/hohmann-finite-burn/)
